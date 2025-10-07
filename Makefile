@@ -118,7 +118,7 @@ test_simd256_intrinsics_i386: camellia_simd128_with_x86_aesni_avx2_i386.o \
 test_simd128_intrinsics_aarch64: camellia_simd128_with_aarch64_ce.o \
 				 main_simd128_aarch64.o \
 				 camellia_ref_aarch64.o
-	$(CC_AARCH64) $^ -o $@ $(LDFLAGS)
+	$(CC_AARCH64) -static $^ -o $@ $(LDFLAGS)
 
 test_simd128_intrinsics_ppc64le: camellia_simd128_with_ppc64le.o \
 				 main_simd128_ppc64le.o \
