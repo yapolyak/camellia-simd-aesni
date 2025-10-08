@@ -128,11 +128,12 @@ static const uint8x16_t shift_row =
  **********************************************************************/
 #include <arm_neon.h>
 
-extern void camellia_neon_test();
 extern uint64x2_t filter_8bit_neon(uint64x2_t data, 
                                     uint64x2_t lo_table, 
                                     uint64x2_t hi_table, 
                                     uint64x2_t mask);
+extern void rol32_1_16_neon(uint64x2_t *v0, uint64x2_t *v1, 
+                            uint64x2_t *v2, uint64x2_t *v3);
 
 #define __m128i uint64x2_t
 
@@ -657,7 +658,12 @@ extern uint64x2_t filter_8bit_neon(uint64x2_t data,
 	vpand128(l2, t2, t2); \
 	vpand128(l3, t3, t3); \
 	\
-	rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
+  if_arm_neon( \
+	  rol32_1_16_neon(&t3, &t2, &t1, &t0); \
+  ) \
+  if_not_arm_neon( \
+	  rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
+  ) \
 	\
 	vpxor128(l4, t0, l4); \
 	vmovdqa128(l4, l[4]); \
@@ -710,7 +716,12 @@ extern uint64x2_t filter_8bit_neon(uint64x2_t data,
 	vpand128(r[2], t2, t2); \
 	vpand128(r[3], t3, t3); \
 	\
-	rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
+  if_arm_neon( \
+	  rol32_1_16_neon(&t3, &t2, &t1, &t0); \
+  ) \
+  if_not_arm_neon( \
+	  rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
+  ) \
 	\
 	vpxor128(r[4], t0, t0); \
 	vpxor128(r[5], t1, t1); \
@@ -1073,9 +1084,6 @@ static const __m128i mask_0f =
 void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 				     const void *vin)
 {
-#ifdef __ARM_NEON
-  camellia_neon_test();
-#endif
   char *out = vout;
   const char *in = vin;
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15;
