@@ -114,6 +114,8 @@ static const uint8x16_t shift_row =
 	vpshufb128(shufmask_reg, (a), (o))
 #define if_aes_subbytes(...) __VA_ARGS__
 #define if_not_aes_subbytes(...) /*_*/
+#define if_arm_neon(...) /*_*/
+#define if_not_arm_neon(...) __VA_ARGS__
 
 #define memory_barrier_with_vec(a) __asm__("" : "+wa"(a) :: "memory")
 
@@ -125,6 +127,12 @@ static const uint8x16_t shift_row =
   AT&T x86 asm to intrinsics conversion macros (ARMv8-CE)
  **********************************************************************/
 #include <arm_neon.h>
+
+extern void camellia_neon_test();
+extern uint64x2_t filter_8bit_neon(uint64x2_t data, 
+                                    uint64x2_t lo_table, 
+                                    uint64x2_t hi_table, 
+                                    uint64x2_t mask);
 
 #define __m128i uint64x2_t
 
@@ -195,6 +203,8 @@ static const uint8x16_t shift_row =
 	vpshufb128(shufmask_reg, a, o)
 #define if_aes_subbytes(...) /*_*/
 #define if_not_aes_subbytes(...) __VA_ARGS__
+#define if_arm_neon(...) __VA_ARGS__
+#define if_not_arm_neon(...) /*_*/
 
 #define memory_barrier_with_vec(a) __asm__("" : "+w"(a) :: "memory")
 
@@ -269,6 +279,8 @@ static const uint8x16_t shift_row =
 	vpshufb128(shufmask_reg, a, o)
 #define if_aes_subbytes(...) /*_*/
 #define if_not_aes_subbytes(...) __VA_ARGS__
+#define if_arm_neon(...) /*_*/
+#define if_not_arm_neon(...) __VA_ARGS__
 
 #define memory_barrier_with_vec(a) __asm__("" : "+x"(a) :: "memory")
 
@@ -377,17 +389,33 @@ static const uint8x16_t shift_row =
 	/* prefilter sboxes 1, 2 and 3 */ \
 	load_frequent_const(pre_tf_lo_s4, t2); \
 	load_frequent_const(pre_tf_hi_s4, t3); \
-	filter_8bit(x0, t0, t1, t7, t6); \
-	filter_8bit(x7, t0, t1, t7, t6); \
-	filter_8bit(x1, t0, t1, t7, t6); \
-	filter_8bit(x4, t0, t1, t7, t6); \
-	filter_8bit(x2, t0, t1, t7, t6); \
-	filter_8bit(x5, t0, t1, t7, t6); \
+  if_arm_neon( \
+	  x0 = filter_8bit_neon(x0, t0, t1, t7); \
+	  x7 = filter_8bit_neon(x7, t0, t1, t7); \
+	  x1 = filter_8bit_neon(x1, t0, t1, t7); \
+	  x4 = filter_8bit_neon(x4, t0, t1, t7); \
+	  x2 = filter_8bit_neon(x2, t0, t1, t7); \
+	  x5 = filter_8bit_neon(x5, t0, t1, t7); \
+  ) \
+  if_not_arm_neon( \
+	  filter_8bit(x0, t0, t1, t7, t6); \
+	  filter_8bit(x7, t0, t1, t7, t6); \
+	  filter_8bit(x1, t0, t1, t7, t6); \
+	  filter_8bit(x4, t0, t1, t7, t6); \
+	  filter_8bit(x2, t0, t1, t7, t6); \
+	  filter_8bit(x5, t0, t1, t7, t6); \
+  ) \
 	\
 	/* prefilter sbox 4 */ \
 	if_not_aes_subbytes(load_zero(t4);) \
-	filter_8bit(x3, t2, t3, t7, t6); \
-	filter_8bit(x6, t2, t3, t7, t6); \
+  if_arm_neon( \
+	  x3 = filter_8bit_neon(x3, t2, t3, t7); \
+	  x6 = filter_8bit_neon(x6, t2, t3, t7); \
+  )\
+  if_not_arm_neon( \
+	  filter_8bit(x3, t2, t3, t7, t6); \
+	  filter_8bit(x6, t2, t3, t7, t6); \
+  ) \
 	\
 	/* AES subbytes + AES shift rows */ \
 	load_frequent_const(post_tf_lo_s1, t0); \
@@ -416,22 +444,42 @@ static const uint8x16_t shift_row =
 	/* postfilter sboxes 1 and 4 */ \
 	load_frequent_const(post_tf_lo_s3, t2); \
 	load_frequent_const(post_tf_hi_s3, t3); \
-	filter_8bit(x0, t0, t1, t7, t6); \
-	filter_8bit(x7, t0, t1, t7, t6); \
-	filter_8bit(x3, t0, t1, t7, t6); \
-	filter_8bit(x6, t0, t1, t7, t6); \
+  if_arm_neon(\
+	  x0 = filter_8bit_neon(x0, t0, t1, t7); \
+	  x7 = filter_8bit_neon(x7, t0, t1, t7); \
+	  x3 = filter_8bit_neon(x3, t0, t1, t7); \
+	  x6 = filter_8bit_neon(x6, t0, t1, t7); \
+  ) \
+  if_not_arm_neon(\
+	  filter_8bit(x0, t0, t1, t7, t6); \
+	  filter_8bit(x7, t0, t1, t7, t6); \
+	  filter_8bit(x3, t0, t1, t7, t6); \
+	  filter_8bit(x6, t0, t1, t7, t6); \
+  ) \
 	\
 	/* postfilter sbox 3 */ \
 	load_frequent_const(post_tf_lo_s2, t4); \
 	load_frequent_const(post_tf_hi_s2, t5); \
-	filter_8bit(x2, t2, t3, t7, t6); \
-	filter_8bit(x5, t2, t3, t7, t6); \
+  if_arm_neon(\
+	  x2 = filter_8bit_neon(x2, t2, t3, t7); \
+	  x5 = filter_8bit_neon(x5, t2, t3, t7); \
+  ) \
+  if_not_arm_neon( \
+	  filter_8bit(x2, t2, t3, t7, t6); \
+	  filter_8bit(x5, t2, t3, t7, t6); \
+  ) \
 	\
 	vmovq128((key), t0); \
 	\
 	/* postfilter sbox 2 */ \
-	filter_8bit(x1, t4, t5, t7, t2); \
-	filter_8bit(x4, t4, t5, t7, t2); \
+  if_arm_neon(\
+	  x1 = filter_8bit_neon(x1, t4, t5, t7); \
+	  x4 = filter_8bit_neon(x4, t4, t5, t7); \
+  ) \
+  if_not_arm_neon( \
+	  filter_8bit(x1, t4, t5, t7, t2); \
+	  filter_8bit(x4, t4, t5, t7, t2); \
+  ) \
 	\
 	/* P-function */ \
 	vpxor128(x5, x0, x0); \
@@ -1025,6 +1073,9 @@ static const __m128i mask_0f =
 void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 				     const void *vin)
 {
+#ifdef __ARM_NEON
+  camellia_neon_test();
+#endif
   char *out = vout;
   const char *in = vin;
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15;
@@ -1169,13 +1220,23 @@ void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 	vmovdqa128_memld(&post_tf_hi_s1, t1); \
 	\
 	/* prefilter sboxes */ \
-	filter_8bit(x, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
+  if_arm_neon( \
+	  x = filter_8bit_neon(x, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask); \
+  ) \
+  if_not_arm_neon( \
+	  filter_8bit(x, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
+  ) \
 	\
 	/* AES subbytes + AES shift rows + AES inv shift rows */ \
 	aes_subbytes_and_shuf_and_xor(t3, x, x); \
 	\
 	/* postfilter sboxes */ \
-	filter_8bit(x, t0, t1, _0f0f0f0fmask, t2); \
+  if_arm_neon( \
+	  x = filter_8bit_neon(x, t0, t1, _0f0f0f0fmask); \
+  ) \
+  if_not_arm_neon( \
+	  filter_8bit(x, t0, t1, _0f0f0f0fmask, t2); \
+  ) \
 	\
 	/* output rotation for sbox2 (<<< 1) */ \
 	/* output rotation for sbox3 (>>> 1) */ \

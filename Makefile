@@ -117,7 +117,8 @@ test_simd256_intrinsics_i386: camellia_simd128_with_x86_aesni_avx2_i386.o \
 
 test_simd128_intrinsics_aarch64: camellia_simd128_with_aarch64_ce.o \
 				 main_simd128_aarch64.o \
-				 camellia_ref_aarch64.o
+				 camellia_ref_aarch64.o \
+				 camellia_simd128_armv8_neon_aese.o
 	$(CC_AARCH64) -static $^ -o $@ $(LDFLAGS)
 
 test_simd128_intrinsics_ppc64le: camellia_simd128_with_ppc64le.o \
@@ -185,6 +186,9 @@ main_simd128_i386.o: main.c
 
 main_simd256_i386.o: main.c
 	$(CC_I386) $(CFLAGS) -DUSE_SIMD256 -c $< -o $@
+
+camellia_simd128_armv8_neon_aese.o: camellia_simd128_armv8_neon_aese.S
+	$(CC_AARCH64) $(CFLAGS_SIMD128_ARM) -c $< -o $@
 
 camellia_simd128_with_aarch64_ce.o: camellia_simd128_with_aes_instruction_set.c
 	$(CC_AARCH64) $(CFLAGS_SIMD128_ARM) -c $< -o $@
