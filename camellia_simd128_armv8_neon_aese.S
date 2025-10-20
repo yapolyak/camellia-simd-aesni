@@ -331,7 +331,7 @@ enc_rounds16_neon:
     two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x0,x1,x4,store_ab_state)
     // Third round
     add     x4,x6,#48               // &key_table[i+6]
-    two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x0,x1,x4,dummy_store)
+    two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x0,x1,x4,store_ab_state)
 
     // Restore callee-saved registers
     ldp     q8,q9,[sp,#16]

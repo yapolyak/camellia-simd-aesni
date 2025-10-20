@@ -1116,6 +1116,14 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   while (1) {
 #ifdef __ARM_NEON
     enc_rounds16_neon(ab, cd, ctx->key_table, k);
+    vmovdqa128_memld(&ab[0], x0);
+    vmovdqa128_memld(&ab[1], x1);
+    vmovdqa128_memld(&ab[2], x2);
+    vmovdqa128_memld(&ab[3], x3);
+    vmovdqa128_memld(&ab[4], x4);
+    vmovdqa128_memld(&ab[5], x5);
+    vmovdqa128_memld(&ab[6], x6);
+    vmovdqa128_memld(&ab[7], x7);
 #else
     enc_rounds16(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14,
 	         x15, ab, cd, k);

@@ -2,7 +2,7 @@ CC_X86_64 = x86_64-linux-gnu-gcc
 CC_I386 = i686-linux-gnu-gcc
 CC_AARCH64 = aarch64-linux-gnu-gcc
 CC_PPC64LE = powerpc64le-linux-gnu-gcc
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -g
 CFLAGS_SIMD128_X86 = $(CFLAGS) -march=sandybridge -mtune=native -msse4.1 -maes
 CFLAGS_SIMD256_X86 = $(CFLAGS) -march=haswell -mtune=native -mavx2 -maes
 CFLAGS_SIMD256_X86_VAES = $(CFLAGS) -march=haswell -mtune=native -mavx2 -maes -mvaes
