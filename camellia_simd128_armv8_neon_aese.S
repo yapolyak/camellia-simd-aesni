@@ -182,6 +182,164 @@
     stp     q4,q5,[mem_ab,#64]; \
     stp     q6,q7,[mem_ab,#96];
 
+/*
+ * IN:
+ *  v0..3: byte-sliced 32-bit integers
+ * OUT:
+ *  v0..3: (IN <<< 1)
+ */
+#define rol32_1_16(v0, v1, v2, v3, t0, t1, t2) \
+    ushr    t0.16b,v0.16b,#7; \
+    add     v0.16b,v0.16b,v0.16b; \
+    ushr    t1.16b,v1.16b,#7; \
+    add     v1.16b,v1.16b,v1.16b; \
+    ushr    t2.16b,v2.16b,#7; \
+    add     v2.16b,v2.16b,v2.16b; \
+    orr     v1.16b,t0.16b,v1.16b; \
+    ushr    t0.16b,v3.16b,#7; \
+    add     v3.16b,v3.16b,v3.16b; \
+    orr     v2.16b,t1.16b,v2.16b; \
+    orr     v3.16b,t2.16b,v3.16b; \
+    orr     v0.16b,t0.16b,v0.16b;
+
+/*
+ * IN:
+ *   v0..v7: byte-sliced AB state in registers
+ *   r: byte-sliced AB state in memory
+ *   l: byte-sliced CD state in memory
+ *   keys_ptr: pointer to keys
+ * OUT:
+ *   v0..v7: new byte-sliced CD state
+ * Cobblers:
+ *  x5-x7: storage for keys
+ *  v8-v15,v16-19,v28-v31: temporary vectors
+ */
+#define fls16(v0, v1, v2, v3, v4, v5, v6, v7, mem_l, mem_r, keys_ptr) \
+    ldp     x5, x6, [keys_ptr]; /* x5={klr,kll}, x6={krr,krl} */ \
+	/* \
+	 * t0 = kll; \
+	 * t0 &= ll; \
+	 * lr ^= rol32(t0, 1); \
+	 */ \
+    eor     v19.16b,v19.16b,v19.16b; \
+    movi    v18.16b,#1; \
+    fmov    s31, w5;       /* v31 lower = kll */ \
+    movi    v17.16b,#2; \
+    movi    v16.16b,#3; \
+    tbl     v19.16b,{v31.16b},v19.16b; \
+    tbl     v18.16b,{v31.16b},v18.16b; \
+    tbl     v17.16b,{v31.16b},v17.16b; \
+    tbl     v16.16b,{v31.16b},v16.16b; \
+\
+    ldp     q12,q13,[mem_r,#64]; /* pre-load right-hand state parts */ \
+    and     v16.16b,v0.16b,v16.16b; \
+    and     v17.16b,v1.16b,v17.16b; \
+    ldp     q14,q15,[mem_r,#96]; /* pre-load right-hand state parts */ \
+    and     v18.16b,v2.16b,v18.16b; \
+    and     v19.16b,v3.16b,v19.16b; \
+\
+    rol32_1_16(v19,v18,v17,v16,v28,v29,v30); \
+\
+    eor     v4.16b,v16.16b,v4.16b; \
+    eor     v5.16b,v17.16b,v5.16b; \
+    eor     v6.16b,v18.16b,v6.16b; \
+    eor     v7.16b,v19.16b,v7.16b; \
+    stp     q4,q5,[mem_l,#64]; \
+    stp     q6,q7,[mem_l,#96]; \
+\
+	/* \
+	 * t2 = krr; \
+	 * t2 |= rr; \
+	 * rl ^= t2; \
+	 */ \
+\
+    lsr     x7,x6,#32; \
+    eor     v19.16b,v19.16b,v19.16b; \
+    ldp     q8,q9,[mem_r]; /* pre-load right-hand state parts */ \
+    movi    v18.16b,#1; \
+    fmov    s31,w7; \
+    movi    v17.16b,#2; \
+    movi    v16.16b,#3; \
+    ldp     q10,q11,[mem_r,#32]; /* pre-load right-hand state parts */ \
+    tbl     v19.16b,{v31.16b},v19.16b; \
+    tbl     v18.16b,{v31.16b},v18.16b; \
+    tbl     v17.16b,{v31.16b},v17.16b; \
+    tbl     v16.16b,{v31.16b},v16.16b; \
+\
+    orr     v16.16b,v12.16b,v16.16b; \
+    orr     v17.16b,v13.16b,v17.16b; \
+    orr     v18.16b,v14.16b,v18.16b; \
+    orr     v19.16b,v15.16b,v19.16b; \
+\
+    eor     v8.16b,v8.16b,v16.16b; \
+    eor     v9.16b,v9.16b,v17.16b; \
+    eor     v10.16b,v10.16b,v18.16b; \
+    eor     v11.16b,v11.16b,v19.16b; \
+\
+    stp     q8,q9,[mem_r]; /*Note, updated values stay in v8-v11*/ \
+    stp     q10,q11,[mem_r,#32];\
+\
+	/* \
+	 * t2 = krl; \
+	 * t2 &= rl; \
+	 * rr ^= rol32(t2, 1); \
+	 */ \
+\
+    eor     v19.16b,v19.16b,v19.16b; \
+    movi    v18.16b,#1; \
+    fmov    s31,w6; \
+    movi    v17.16b,#2; \
+    movi    v16.16b,#3; \
+    tbl     v19.16b,{v31.16b},v19.16b; \
+    tbl     v18.16b,{v31.16b},v18.16b; \
+    tbl     v17.16b,{v31.16b},v17.16b; \
+    tbl     v16.16b,{v31.16b},v16.16b; \
+\
+    and     v16.16b,v8.16b,v16.16b; /*Re-use updated right state values*/ \
+    and     v17.16b,v9.16b,v17.16b; \
+    and     v18.16b,v10.16b,v18.16b; \
+    and     v19.16b,v11.16b,v19.16b; \
+\
+    rol32_1_16(v19,v18,v17,v16,v28,v29,v30); \
+\
+    eor     v12.16b,v16.16b,v12.16b; \
+    eor     v13.16b,v17.16b,v13.16b; \
+    eor     v14.16b,v18.16b,v14.16b; \
+    eor     v15.16b,v19.16b,v15.16b; \
+    stp     q12,q13,[mem_r,#64]; \
+    stp     q14,q15,[mem_r,#96]; \
+\
+	/* \
+	 * t0 = klr; \
+	 * t0 |= lr; \
+	 * ll ^= t0; \
+	 */ \
+\
+    lsr     x7,x5,#32; \
+    eor     v19.16b,v19.16b,v19.16b; \
+    movi    v18.16b,#1; \
+    fmov    s31,w7; \
+    movi    v17.16b,#2; \
+    movi    v16.16b,#3; \
+    tbl     v19.16b,{v31.16b},v19.16b; \
+    tbl     v18.16b,{v31.16b},v18.16b; \
+    tbl     v17.16b,{v31.16b},v17.16b; \
+    tbl     v16.16b,{v31.16b},v16.16b; \
+\
+    orr     v16.16b,v4.16b,v16.16b; \
+    orr     v17.16b,v5.16b,v17.16b; \
+    orr     v18.16b,v6.16b,v18.16b; \
+    orr     v19.16b,v7.16b,v19.16b; \
+\
+    eor     v0.16b,v0.16b,v16.16b; \
+    eor     v1.16b,v1.16b,v17.16b; \
+    eor     v2.16b,v2.16b,v18.16b; \
+    eor     v3.16b,v3.16b,v19.16b; \
+\
+    stp     q0,q1,[mem_l]; \
+    stp     q2,q3,[mem_l,#32];\
+
+
 .text
 /*
     Inputs:
@@ -219,18 +377,7 @@ rol32_1_16_neon:
     ld1 {v1.16b}, [x1]
     ld1 {v2.16b}, [x2]
     ld1 {v3.16b}, [x3]
-    ushr    v4.16b,v0.16b,#7
-    add     v0.16b,v0.16b,v0.16b
-    ushr    v5.16b,v1.16b,#7
-    add     v1.16b,v1.16b,v1.16b
-    ushr    v6.16b,v2.16b,#7
-    add     v2.16b,v2.16b,v2.16b
-    orr     v1.16b,v4.16b,v1.16b
-    ushr    v4.16b,v3.16b,#7        // dependency chain - use extra tmp vector?
-    add     v3.16b,v3.16b,v3.16b
-    orr     v2.16b,v5.16b,v2.16b
-    orr     v3.16b,v6.16b,v3.16b
-    orr     v0.16b,v4.16b,v0.16b
+    rol32_1_16(v0, v1, v2, v3, v4, v5, v6)
     // Store the results back to memory (todo: remove)
     st1 {v0.16b}, [x0]
     st1 {v1.16b}, [x1]
@@ -343,3 +490,34 @@ enc_rounds16_neon:
 
     ret
 .size   enc_rounds16_neon,.-enc_rounds16_neon
+
+.globl  fls16_neon
+.type   fls16_neon,%function
+.align  5
+fls16_neon:
+    stp     x29,x30,[sp,#-144]!
+    mov     x29,sp
+    
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    // Load ab state vectors
+    ldp     q0,q1,[x0]
+    ldp     q2,q3,[x0,#32]
+    ldp     q4,q5,[x0,#64]
+    ldp     q6,q7,[x0,#96]
+
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x0, x1, x2)
+
+    // Restore callee-saved registers
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+
+    ldp     x29,x30,[sp],#144
+
+    ret
+.size   fls16_neon,.-fls16_neon

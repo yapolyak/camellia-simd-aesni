@@ -141,6 +141,8 @@ void enc_rounds16_neon(
     int i                        // Passed in w3
 );
 
+extern void fls16_neon(uint64x2_t *mem_ab, uint64x2_t *mem_cd, const uint64_t *keys);
+
 #define __m128i uint64x2_t
 
 #define vpand128(a, b, o)       (o = vandq_u64(b, a))
@@ -1132,8 +1134,12 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
     if (k == lastk - 8)
       break;
 
+#ifdef __ARM_NEON
+    fls16_neon(ab, cd, &ctx->key_table[k + 8]);
+#else
     fls16(ab, x0, x1, x2, x3, x4, x5, x6, x7, cd, x8, x9, x10, x11, x12, x13, x14,
 	  x15, &ctx->key_table[k + 8], &ctx->key_table[k + 9]);
+#endif
 
     k += 8;
   }
