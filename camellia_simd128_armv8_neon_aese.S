@@ -835,10 +835,6 @@ camellia_encrypt_16blks_neon:
     inpack16_post(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
                   x10, x11, v16, v17, x4)
 
-    // === MAIN ROUND LOOP ===
-    mov     x12,#0      // x12 -> k = 0
-    sub     x14,x8,#8   // x14 -> lastk - 8
-.Lenc_loop:
     // Load Constants into v16-v27
     adrp    x15,camellia_neon_consts
     add     x15,x15,:lo12:camellia_neon_consts
@@ -848,8 +844,12 @@ camellia_encrypt_16blks_neon:
     ldp     q24,q25,[x15],#32    // post_tf_lo/hi_s2
     ldp     q26,q27,[x15],#32    // post_tf_lo/hi_s3
     ldr     q17,[x15],#16        // inv_shift_row
-    ldr     q16,[x15],#16        // mask_0f
+    ldr     q16,[x15],#-176        // mask_0f
 
+    // === MAIN ROUND LOOP ===
+    mov     x12,#0      // x12 -> k = 0
+    sub     x14,x8,#8   // x14 -> lastk - 8
+.Lenc_loop:
     // Calculate base key pointer for this block: &key_table[k]
     lsl     x13,x12,#3  // x13 -> key_base_idx = k * 8
     add     x13,x0,x13  // x13 = &key_table[k] - assuming here key_table_base = ctx[0] -> x0
@@ -876,6 +876,10 @@ camellia_encrypt_16blks_neon:
 
     // Increment k
     add     x12,x12,#8
+
+    ldp     q18,q19,[x15],#160    // pre_tf_lo/hi_s1
+    ldr     q17,[x15],#16           // inv_shift_row
+    ldr     q16,[x15],#-176        // mask_0f
     b       .Lenc_loop
 
 .Lenc_done:
