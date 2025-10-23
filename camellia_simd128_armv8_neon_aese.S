@@ -210,7 +210,7 @@
  *   keys_ptr: pointer to keys
  * OUT:
  *   v0..v7: new byte-sliced CD state
- * Cobblers:
+ * Clobbers:
  *  x5-x7: storage for keys
  *  v8-v15,v16-19,v28-v31: temporary vectors
  */
@@ -339,6 +339,196 @@
     stp     q0,q1,[mem_l]; \
     stp     q2,q3,[mem_l,#32];\
 
+#define transpose_4x4(v0, v1, v2, v3, t1, t2) \
+    zip2    t2.4s,v0.4s,v1.4s; \
+    zip1    v0.4s,v0.4s,v1.4s; \
+\
+    zip1    t1.4s,v2.4s,v3.4s; \
+    zip2    v2.4s,v2.4s,v3.4s; \
+\
+    zip2    v1.2d,v0.2d,t1.2d; \
+    zip1    v0.2d,v0.2d,t1.2d; \
+\
+    zip2    v3.2d,t2.2d,v2.2d; \
+    zip1    v2.2d,t2.2d,v2.2d;
+
+/* 
+ * IN: 
+ *  a0-a3, b0-b3, c0-c3, d0-d3 (vector registers)
+ * OUT:
+ *  a0-a3, b0-b3, c0-c3, d0-d3 (transposed, in registers)
+ * Clobbers:
+ *  t0 (v16), t1 (v17) (vector registers), tmp (GPR for constant address)
+*/
+#define byteslice_16x16b_fast(a0, b0, c0, d0, a1, b1, c1, d1, a2, b2, c2, d2, \
+                                   a3, b3, c3, d3, t0, t1, tmp) \
+    transpose_4x4(a0, a1, a2, a3, t0, t1); \
+    transpose_4x4(b0, b1, b2, b3, t0, t1); \
+\
+    transpose_4x4(c0, c1, c2, c3, t0, t1); \
+    transpose_4x4(d0, d1, d2, d3, t0, t1); \
+\
+    adrp    tmp,.Lshufb_16x16b; \
+    add     tmp,tmp,:lo12:.Lshufb_16x16b; \
+    ldr     q16,[tmp]; \
+\
+    tbl     a0.16b,{a0.16b},t0.16b; \
+    tbl     a1.16b,{a1.16b},t0.16b; \
+    tbl     a2.16b,{a2.16b},t0.16b; \
+    tbl     a3.16b,{a3.16b},t0.16b; \
+    tbl     b0.16b,{b0.16b},t0.16b; \
+    tbl     b1.16b,{b1.16b},t0.16b; \
+    tbl     b2.16b,{b2.16b},t0.16b; \
+    tbl     b3.16b,{b3.16b},t0.16b; \
+    tbl     c0.16b,{c0.16b},t0.16b; \
+    tbl     c1.16b,{c1.16b},t0.16b; \
+    tbl     c2.16b,{c2.16b},t0.16b; \
+    tbl     c3.16b,{c3.16b},t0.16b; \
+    tbl     d0.16b,{d0.16b},t0.16b; \
+    tbl     d1.16b,{d1.16b},t0.16b; \
+    tbl     d2.16b,{d2.16b},t0.16b; \
+    tbl     d3.16b,{d3.16b},t0.16b; \
+\
+    transpose_4x4(a0, b0, c0, d0, t0, t1); \
+    transpose_4x4(a1, b1, c1, d1, t0, t1); \
+\
+    transpose_4x4(a2, b2, c2, d2, t0, t1); \
+    transpose_4x4(a3, b3, c3, d3, t0, t1);
+
+/*
+ * IN:
+ *  key_ptr (GPR), rio_ptr (GPR)
+ * OUT:
+ *  v0-v15 (whitened plaintext)
+ * Clobbers:
+ *  tmp_key (v16, vector), tmp_gpr (GPR for addr), v17, v18
+ */
+#define inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                     rio_ptr, key_ptr, tmp_key, tmp_gpr) \
+    /* Load and prepare key */ \
+    ldr     tmp_gpr,[key_ptr]; \
+    fmov    d16,tmp_gpr; \
+    adrp    tmp_gpr,.Lpack_bswap; \
+    add     tmp_gpr,tmp_gpr,:lo12:.Lpack_bswap; \
+    ldr     q17,[tmp_gpr]; /* Load constant into a temporary */ \
+    tbl     tmp_key.16b,{tmp_key.16b},v17.16b; \
+    \
+    /* Load plaintext blocks and XOR with key; TODO: interleave a bit with above? */ \
+    ldr     q18,[rio_ptr,#(0*16)]; \
+    eor     v15.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(1*16)]; \
+    eor     v14.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(2*16)]; \
+    eor     v13.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(3*16)]; \
+    eor     v12.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(4*16)]; \
+    eor     v11.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(5*16)]; \
+    eor     v10.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(6*16)]; \
+    eor     v9.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(7*16)]; \
+    eor     v8.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(8*16)]; \
+    eor     v7.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(9*16)]; \
+    eor     v6.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(10*16)]; \
+    eor     v5.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(11*16)]; \
+    eor     v4.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(12*16)]; \
+    eor     v3.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(13*16)]; \
+    eor     v2.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(14*16)]; \
+    eor     v1.16b,v18.16b,tmp_key.16b; \
+    ldr     q18,[rio_ptr,#(15*16)]; \
+    eor     v0.16b,v18.16b,tmp_key.16b;
+
+/*
+ * IN:
+ *  v0-v15 (whitened plaintext)
+ *  mem_ab, mem_cd (GPRs)
+ * OUT:
+ *  Writes byte-sliced state to memory buffers.
+ * Clobbers:
+ *  v0-v15 (become byte-sliced), st0, st1 (vector temps - v16,v17), tmp (GPR temp)
+ */
+#define inpack16_post(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                            mem_ab, mem_cd, st0, st1, tmp) \
+    /* Perform the byte-slice transpose in-place on v0-v15 */ \
+    byteslice_16x16b_fast(v0, v1, v2, v3, v4, v5, v6, v7, \
+                          v8, v9, v10, v11, v12, v13, v14, v15, \
+                          st0, st1, tmp); \
+    \
+    /* Store the results */ \
+    stp     q0,q1,[mem_ab]; \
+    stp     q2,q3,[mem_ab,#32]; \
+    stp     q4,q5,[mem_ab,#64]; \
+    stp     q6,q7,[mem_ab,#96]; \
+    stp     q8,q9,[mem_cd]; \
+    stp     q10,q11,[mem_cd,#32]; \
+    stp     q12,q13,[mem_cd,#64]; \
+    stp     q14,q15,[mem_cd,#96];
+
+/* 
+ * IN:
+ *  v0-v15 (byte-sliced ciphertext), key_ptr (GPR)
+ * OUT:
+ *  v0-v15 (block-oriented, whitened ciphertext)
+ * Clobbers:
+ *  tmp_v0, tmp_v1, tmp_key (vector temps - v16:v18),
+ *  tmp_gpr (GPR temp)
+ */
+#define outunpack16(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                          key_ptr, tmp_v0, tmp_v1, tmp_key, tmp_gpr) \
+    /* Perform inverse byte-slice (transpose) in-place */ \
+    byteslice_16x16b_fast(v8, v12, v0, v4, v9, v13, v1, v5, v10, v14, v2, v6, \
+                               v11, v15, v3, v7, \
+                               tmp_v0, tmp_v1, tmp_gpr); \
+    \
+    /* Load and prepare final key */ \
+    ldr     tmp_gpr,[key_ptr]; \
+    fmov    d18,tmp_gpr; \
+    adrp    tmp_gpr,.Lpack_bswap; \
+    add     tmp_gpr,tmp_gpr,:lo12:.Lpack_bswap; \
+    ldr     q16,[tmp_gpr]; /* Load constant into a temporary */ \
+    tbl     tmp_key.16b,{tmp_key.16b},tmp_v0.16b; \
+    \
+    /* XOR with final key */ \
+    eor     v0.16b,v0.16b,tmp_key.16b; \
+    eor     v1.16b,v1.16b,tmp_key.16b; \
+    eor     v2.16b,v2.16b,tmp_key.16b; \
+    eor     v3.16b,v3.16b,tmp_key.16b; \
+    eor     v4.16b,v4.16b,tmp_key.16b; \
+    eor     v5.16b,v5.16b,tmp_key.16b; \
+    eor     v6.16b,v6.16b,tmp_key.16b; \
+    eor     v7.16b,v7.16b,tmp_key.16b; \
+    eor     v8.16b,v8.16b,tmp_key.16b; \
+    eor     v9.16b,v9.16b,tmp_key.16b; \
+    eor     v10.16b,v10.16b,tmp_key.16b; \
+    eor     v11.16b,v11.16b,tmp_key.16b; \
+    eor     v12.16b,v12.16b,tmp_key.16b; \
+    eor     v13.16b,v13.16b,tmp_key.16b; \
+    eor     v14.16b,v14.16b,tmp_key.16b; \
+    eor     v15.16b,v15.16b,tmp_key.16b;
+
+/*
+ * Inputs:
+ *  v0-v15 (final block-oriented ciphertext), rio_ptr (GPR)
+ */
+#define write_output(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, rio_ptr) \
+    /* TODO: check the order! */ \
+    stp     q7,q6,[rio_ptr]; \
+    stp     q5,q4,[rio_ptr,#32]; \
+    stp     q3,q2,[rio_ptr,#64]; \
+    stp     q1,q0,[rio_ptr,#96]; \
+    stp     q15,q14,[rio_ptr,#128]; \
+    stp     q13,q12,[rio_ptr,#160]; \
+    stp     q11,q10,[rio_ptr,#192]; \
+    stp     q9,q8,[rio_ptr,#224];
 
 .text
 /*
@@ -426,6 +616,10 @@ camellia_neon_consts:
     .byte 0x08, 0x05, 0x02, 0x0f, 0x0c, 0x09, 0x06, 0x03
 .Lmask_0f:
     .quad 0x0f0f0f0f0f0f0f0f, 0x0f0f0f0f0f0f0f0f
+.Lpack_bswap:
+    .byte   3, 2, 1, 0, 7, 6, 5, 4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+.Lshufb_16x16b:
+    .byte   0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15
 .size   camellia_neon_consts,.-camellia_neon_consts
 .previous
 
@@ -521,3 +715,192 @@ fls16_neon:
 
     ret
 .size   fls16_neon,.-fls16_neon
+
+.globl  inpack_pre_post_neon
+.type   inpack_pre_post_neon,%function
+.align  5
+inpack_pre_post_neon:
+    stp     x29, x30, [sp, #-144]!      // 16 bytes for FP/LR + 128 bytes for 8 vectors
+    mov     x29, sp
+
+    stp     q8,  q9,  [sp, #16]
+    stp     q10, q11, [sp, #48]
+    stp     q12, q13, [sp, #80]
+    stp     q14, q15, [sp, #112]
+
+    inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                 x0, x1, v16, x4)
+    inpack16_post(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                  x2, x3, v16, v17, x4)
+
+    ldp     q8,  q9,  [sp, #16]
+    ldp     q10, q11, [sp, #48]
+    ldp     q12, q13, [sp, #80]
+    ldp     q14, q15, [sp, #112]
+
+    ldp     x29, x30, [sp], #144
+    ret
+.size   inpack_pre_post_neon,.-inpack_pre_post_neon
+
+.globl  outpack_write_neon
+.type   outpack_write_neon,%function
+.align  5
+outpack_write_neon:
+    stp     x29, x30, [sp, #-144]!      // 16 bytes for FP/LR + 128 bytes for 8 vectors
+    mov     x29, sp
+
+    stp     q8,  q9,  [sp, #16]
+    stp     q10, q11, [sp, #48]
+    stp     q12, q13, [sp, #80]
+    stp     q14, q15, [sp, #112]
+
+    // Load final AB state into v0-v7
+    ldp     q0, q1, [x0]
+    ldp     q2, q3, [x0, #32]
+    ldp     q4, q5, [x0, #64]
+    ldp     q6, q7, [x0, #96]
+    // Load final CD state into v8-v15
+    ldp     q8, q9, [x1]
+    ldp     q10, q11, [x1, #32]
+    ldp     q12, q13, [x1, #64]
+    ldp     q14, q15, [x1, #96]
+
+    outunpack16(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                x2, v16, v17, v18, x4)
+
+    write_output(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, x3)
+
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+
+    ldp     x29,x30,[sp],#144
+
+    ret
+.size   outpack_write_neon,.-outpack_write_neon
+
+// Define aliases for C function arguments and key temporary GPRs
+//#define ctx_ptr         x0
+//#define vout_ptr        x1
+//#define vin_ptr         x2
+//#define key_table_base  x3  // Will hold ctx->key_table address
+//#define temp_gpr        x4  // General scratch GPR
+//#define tmp_key_ptr     x4  // Alias for key ptr calculations
+//#define round_key_val   x5  // Used inside roundsm16
+//#define fls_key_gpr_A   x5  // Used inside fls16
+//#define fls_key_gpr_B   x6  // Used inside fls16
+//#define lastk_reg       x8  // Holds lastk value
+//#define k_reg           x12 // Loop counter 'k'
+//#define key_base_idx    x13 // Holds &key_table[k]
+//#define loop_end_check  x14 // Holds lastk - 8
+// Define aliases for temporary buffer pointers
+//#define mem_ab_ptr      x10 // Using vout buffer for AB state
+//#define mem_cd_ptr      x11 // Using vout buffer (+128) for CD state
+// Note: fls16 uses v8-v15, v20-v31 for its temps
+
+.globl  camellia_encrypt_16blks_neon
+.type   camellia_encrypt_16blks_neon,%function
+.align  5
+camellia_encrypt_16blks_neon:
+    // === PROLOGUE ===
+    stp     x29,x30,[sp,#-144]!
+    mov     x29,sp
+    
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    // === SETUP ===
+    // Determine lastk
+    ldr     w9,[x0,#272]
+    mov     w8,#32
+    mov     w10,#24
+    cmp     w9,#16
+    csel    w8,w10,w8,le         // x8 -> lastk: if key_length <= 16 then 24, else - 32 
+
+    // === INPUT PROCESSING ===
+    // Call inpack16_pre: reads vin(x2), key[0](=ctx_ptr: x0), writes v0-v15
+    // clobbers: v16-v18 and x4
+    inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                 x2, x0, v16, x4)
+
+    // Set up temp buffer pointers using vout_ptr (x1)
+    mov     x10,x1          // x10 -> vout
+    add     x11,x1,#128     // x11 -> vout + 128
+
+    // Call inpack16_post: byte-slices v0-v15, stores to mem_ab(x10), mem_cd(x11)
+    // Clobbers: 
+    inpack16_post(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                  x10, x11, v16, v17, x4)
+
+    // === MAIN ROUND LOOP ===
+    mov     x12,#0      // x12 -> k = 0
+    sub     x14,x8,#8   // x14 -> lastk - 8
+.Lenc_loop:
+    // Load Constants into v16-v27
+    adrp    x15,camellia_neon_consts
+    add     x15,x15,:lo12:camellia_neon_consts
+    ldp     q18,q19,[x15],#32    // pre_tf_lo/hi_s1
+    ldp     q20,q21,[x15],#32    // pre_tf_lo/hi_s4
+    ldp     q22,q23,[x15],#32    // post_tf_lo/hi_s1
+    ldp     q24,q25,[x15],#32    // post_tf_lo/hi_s2
+    ldp     q26,q27,[x15],#32    // post_tf_lo/hi_s3
+    ldr     q17,[x15],#16        // inv_shift_row
+    ldr     q16,[x15],#16        // mask_0f
+
+    // Calculate base key pointer for this block: &key_table[k]
+    lsl     x13,x12,#3  // x13 -> key_base_idx = k * 8
+    add     x13,x0,x13  // x13 = &key_table[k] - assuming here key_table_base = ctx[0] -> x0
+
+    // Round 1 (keys k+2, k+3)
+    add     x4,x13,#16  // &key_table[k+2]
+    two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,store_ab_state)
+
+    // Round 2 (keys k+4, k+5)
+    add     x4,x13,#32  // &key_table[k+4]
+    two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,store_ab_state)
+
+    // Round 3 (keys k+6, k+7)
+    add     x4,x13,#48  // &key_table[k+6]
+    two_roundsm16(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,dummy_store)
+
+    // Check loop condition
+    cmp     x12,x14
+    b.eq    .Lenc_done
+
+    // x4 -> key pointer: &key_table[k+8]
+    add     x4,x13,#64
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4) // uses x5-x7 and v16-v19 as clobbers
+
+    // Increment k
+    add     x12,x12,#8
+    b       .Lenc_loop
+
+.Lenc_done:
+    // Load final CD state from mem_cd(x11) into v8-v15
+    ldp     q8,q9,[x11]
+    ldp     q10,q11,[x11,#32]
+    ldp     q12,q13,[x11,#64]
+    ldp     q14,q15,[x11,#96]
+
+    // Calculate final key pointer: &key_table[lastk] (lastk is in x8)
+    lsl     x4,x8,#3    // lastk * 8
+    add     x4,x0,x4    // &key_table[lastk]
+
+    // Call outunpack16: Operates in-place on v0-v15
+    outunpack16(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                x4, v16, v17, v18, x5)
+
+    write_output(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, x1)
+
+    // === EPILOGUE ===
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+
+    ldp     x29,x30,[sp],#144
+    ret
+.size   camellia_encrypt_16blks_neon,.-camellia_encrypt_16blks_neon

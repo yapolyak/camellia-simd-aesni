@@ -13,6 +13,15 @@
 #include "camellia-BSD-1.2.0/camellia.h"
 #include "camellia_simd.h"
 
+#ifdef __ARM_NEON
+// Declare the assembly function
+extern void camellia_encrypt_16blks_neon(
+    struct camellia_simd_ctx *ctx,
+    void *vout,
+    const void *vin
+);
+#endif
+
 static const uint8_t test_vector_plaintext[] = {
   0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,
   0xfe,0xdc,0xba,0x98,0x76,0x54,0x32,0x10
@@ -165,8 +174,11 @@ static void do_selftest(void)
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
-
+#ifdef __ARM_NEON
+  camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
+#else
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
+#endif
 
   for (i = 0; i < 16; i++) {
     assert(memcmp(&tmp[i * 16], test_vector_ciphertext_128, 16) == 0);
@@ -178,7 +190,11 @@ static void do_selftest(void)
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
+#ifdef __ARM_NEON
+  camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
+#else
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
+#endif
   for (i = 0; i < 16; i++) {
     assert(memcmp(&tmp[i * 16], test_vector_ciphertext_192, 16) == 0);
   }
@@ -189,7 +205,11 @@ static void do_selftest(void)
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
+#ifdef __ARM_NEON
+  camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
+#else
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
+#endif
   for (i = 0; i < 16; i++) {
     assert(memcmp(&tmp[i * 16], test_vector_ciphertext_256, 16) == 0);
   }
@@ -265,7 +285,11 @@ static void do_selftest(void)
   camellia_keysetup_simd128(&ctx_simd, key, 128 / 8);
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
+#ifdef __ARM_NEON
+    camellia_encrypt_16blks_neon(&ctx_simd, tmp, tmp);
+#else
     camellia_encrypt_16blks_simd128(&ctx_simd, tmp, tmp);
+#endif
   }
   assert(memcmp(tmp, ref_large_ciphertext_128, 16 * 16) == 0);
   for (i = 0; i < (1 << 16); i++) {
@@ -277,7 +301,11 @@ static void do_selftest(void)
   camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
+#ifdef __ARM_NEON
+    camellia_encrypt_16blks_neon(&ctx_simd, tmp, tmp);
+#else
     camellia_encrypt_16blks_simd128(&ctx_simd, tmp, tmp);
+#endif
   }
   assert(memcmp(tmp, ref_large_ciphertext_256, 16 * 16) == 0);
   for (i = 0; i < (1 << 16); i++) {
@@ -382,7 +410,11 @@ static void do_speedtest(void)
   start_time = curr_clock_nsecs();
   do {
     for (j = 0; j < sizeof(tmp); ) {
+#ifdef __ARM_NEON
+      camellia_encrypt_16blks_neon(&ctx_simd, &tmp[j], &tmp[j]);
+#else
       camellia_encrypt_16blks_simd128(&ctx_simd, &tmp[j], &tmp[j]);
+#endif
       j += 16 * 16;
       total_bytes += 16 * 16;
     }

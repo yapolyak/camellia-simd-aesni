@@ -140,6 +140,14 @@ void enc_rounds16_neon(
     const uint64_t *key_table_base,  // Passed in x2
     int i                        // Passed in w3
 );
+extern void inpack_pre_post_neon(
+    const void *vin,
+    const uint64_t *key_ptr,
+    uint64x2_t *mem_ab,
+    uint64x2_t *mem_cd
+);
+extern void outpack_write_neon(const uint64x2_t *mem_ab, const uint64x2_t *mem_cd,
+                               const uint64_t *final_key_ptr, void *vout);
 
 extern void fls16_neon(uint64x2_t *mem_ab, uint64x2_t *mem_cd, const uint64_t *keys);
 
@@ -1108,11 +1116,16 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   else
     lastk = 24;
 
+#ifdef __ARM_NEON
+    // Call your single assembly function
+    inpack_pre_post_neon(in, ctx->key_table, ab, cd);
+#else
   inpack16_pre(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14,
 	       x15, in, ctx->key_table[0]);
 
   inpack16_post(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14,
 		x15, ab, cd);
+#endif
 
   k = 0;
   while (1) {
@@ -1144,6 +1157,9 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
     k += 8;
   }
 
+#ifdef __ARM_NEON
+    outpack_write_neon(ab, cd, &ctx->key_table[lastk], out);
+#else
   /* load CD for output */
   vmovdqa128(cd[0], x8);
   vmovdqa128(cd[1], x9);
@@ -1159,6 +1175,7 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 
   write_output(x7, x6, x5, x4, x3, x2, x1, x0, x15, x14, x13, x12, x11, x10, x9,
 	       x8, out);
+#endif
 }
 
 /* Decrypts 16 input block from IN and writes result to OUT. IN and OUT may
