@@ -173,6 +173,29 @@
 \
     store_ab(v0, v1, v2, v3, v4, v5, v6, v7, mem_ab);
 
+/*
+ * IN/OUT:
+ *  v0..v7: byte-sliced AB state preloaded
+ *  mem_ab: byte-sliced AB state in memory
+ *  mem_cd: byte-sliced CD state in memory
+ *  first_key_ptr: ptr to access first key
+ *  store_ab: function to store state
+ * Clobbers:
+ *  x5 - second key pointer value
+ */
+#define two_roundsm16_dec(v0, v1, v2, v3, v4, v5, v6, v7, mem_ab, mem_cd, first_key_ptr, store_ab) \
+    roundsm16(v0, v1, v2, v3, v4, v5, v6, v7, mem_cd, first_key_ptr); \
+\
+    stp     q4,q5,[mem_cd]; \
+    stp     q6,q7,[mem_cd,#32]; \
+    stp     q0,q1,[mem_cd,#64]; \
+    stp     q2,q3,[mem_cd,#96]; \
+\
+    sub     x4,first_key_ptr,#8; \
+    roundsm16(v4, v5, v6, v7, v0, v1, v2, v3, mem_ab, x4); \
+\
+    store_ab(v0, v1, v2, v3, v4, v5, v6, v7, mem_ab);
+
 #define dummy_store(v0, v1, v2, v3, v4, v5, v6, v7, mem_ab) /* do nothing */
 
 #define store_ab_state(v0, v1, v2, v3, v4, v5, v6, v7, mem_ab) \
@@ -214,8 +237,9 @@
  *  x5-x7: storage for keys
  *  v8-v15,v16-19,v28-v31: temporary vectors
  */
-#define fls16(v0, v1, v2, v3, v4, v5, v6, v7, mem_l, mem_r, keys_ptr) \
-    ldp     x5, x6, [keys_ptr]; /* x5={klr,kll}, x6={krr,krl} */ \
+#define fls16(v0, v1, v2, v3, v4, v5, v6, v7, mem_l, mem_r, key_a_ptr, key_b_ptr) \
+    ldr     x5,[key_a_ptr]; /*x5={klr,kll}*/ \
+    ldr     x6,[key_b_ptr]; /*x6={krr,krl}*/ \
 	/* \
 	 * t0 = kll; \
 	 * t0 &= ll; \
@@ -703,7 +727,8 @@ fls16_neon:
     ldp     q4,q5,[x0,#64]
     ldp     q6,q7,[x0,#96]
 
-    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x0, x1, x2)
+    add     x3,x2,#8
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x0, x1, x2, x3)
 
     // Restore callee-saved registers
     ldp     q8,q9,[sp,#16]
@@ -780,25 +805,6 @@ outpack_write_neon:
     ret
 .size   outpack_write_neon,.-outpack_write_neon
 
-// Define aliases for C function arguments and key temporary GPRs
-//#define ctx_ptr         x0
-//#define vout_ptr        x1
-//#define vin_ptr         x2
-//#define key_table_base  x3  // Will hold ctx->key_table address
-//#define temp_gpr        x4  // General scratch GPR
-//#define tmp_key_ptr     x4  // Alias for key ptr calculations
-//#define round_key_val   x5  // Used inside roundsm16
-//#define fls_key_gpr_A   x5  // Used inside fls16
-//#define fls_key_gpr_B   x6  // Used inside fls16
-//#define lastk_reg       x8  // Holds lastk value
-//#define k_reg           x12 // Loop counter 'k'
-//#define key_base_idx    x13 // Holds &key_table[k]
-//#define loop_end_check  x14 // Holds lastk - 8
-// Define aliases for temporary buffer pointers
-//#define mem_ab_ptr      x10 // Using vout buffer for AB state
-//#define mem_cd_ptr      x11 // Using vout buffer (+128) for CD state
-// Note: fls16 uses v8-v15, v20-v31 for its temps
-
 .globl  camellia_encrypt_16blks_neon
 .type   camellia_encrypt_16blks_neon,%function
 .align  5
@@ -872,7 +878,8 @@ camellia_encrypt_16blks_neon:
 
     // x4 -> key pointer: &key_table[k+8]
     add     x4,x13,#64
-    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4) // uses x5-x7 and v16-v19 as clobbers
+    add     x3,x13,#72
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses x5-x7 and v16-v19 as clobbers
 
     // Increment k
     add     x12,x12,#8
@@ -908,3 +915,115 @@ camellia_encrypt_16blks_neon:
     ldp     x29,x30,[sp],#144
     ret
 .size   camellia_encrypt_16blks_neon,.-camellia_encrypt_16blks_neon
+
+.globl  camellia_decrypt_16blks_neon
+.type   camellia_decrypt_16blks_neon,%function
+.align  5
+camellia_decrypt_16blks_neon:
+    // === PROLOGUE ===
+    stp     x29,x30,[sp,#-144]!
+    mov     x29,sp
+    
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    // === SETUP ===
+    // Determine lastk
+    ldr     w9,[x0,#272]
+    mov     w8,#32
+    mov     w10,#24
+    cmp     w9,#16
+    csel    w8,w10,w8,le         // x8 -> lastk: if key_length <= 16 then 24, else - 32 
+
+    // === INPUT PROCESSING ===
+    // Call inpack16_pre: reads vin(x2), key[0](=ctx_ptr: x0), writes v0-v15
+    // clobbers: v16-v18 and x5
+    lsl     x4,x8,#3
+    add     x4,x0,x4
+    inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                 x2, x4, v16, x5)
+
+    // Set up temp buffer pointers using vout_ptr (x1)
+    mov     x10,x1          // x10 -> vout
+    add     x11,x1,#128     // x11 -> vout + 128
+
+    // Call inpack16_post: byte-slices v0-v15, stores to mem_ab(x10), mem_cd(x11)
+    // Clobbers: 
+    inpack16_post(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                  x10, x11, v16, v17, x4)
+
+    // Load Constants into v16-v27
+    adrp    x15,camellia_neon_consts
+    add     x15,x15,:lo12:camellia_neon_consts
+    ldp     q18,q19,[x15],#32    // pre_tf_lo/hi_s1
+    ldp     q20,q21,[x15],#32    // pre_tf_lo/hi_s4
+    ldp     q22,q23,[x15],#32    // post_tf_lo/hi_s1
+    ldp     q24,q25,[x15],#32    // post_tf_lo/hi_s2
+    ldp     q26,q27,[x15],#32    // post_tf_lo/hi_s3
+    ldr     q17,[x15],#16        // inv_shift_row
+    ldr     q16,[x15],#-176        // mask_0f
+
+    // === MAIN ROUND LOOP ===
+    sub     x12,x8,#8   // x14 -> lastk - 8
+.Ldec_loop:
+    // Calculate base key pointer for this block: &key_table[k]
+    lsl     x13,x12,#3  // x13 -> key_base_idx = k * 8
+    add     x13,x0,x13  // x13 = &key_table[k] - assuming here key_table_base = ctx[0] -> x0
+
+    // Round 1 (keys k+6, k+7)
+    add     x4,x13,#56  // &key_table[k+7]
+    two_roundsm16_dec(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,store_ab_state)
+
+    // Round 2 (keys k+4, k+5)
+    add     x4,x13,#40  // &key_table[k+5]
+    two_roundsm16_dec(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,store_ab_state)
+
+    // Round 3 (keys k+2, k+3)
+    add     x4,x13,#24  // &key_table[k+3]
+    two_roundsm16_dec(v0,v1,v2,v3,v4,v5,v6,v7,x10,x11,x4,dummy_store)
+
+    // Check loop condition
+    //cmp     x12,x14
+    cbz     x12,.Ldec_done
+
+    // x4 -> key pointer: &key_table[k+8]
+    add     x3,x13,#0
+    add     x4,x13,#8
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses x5-x7 and v16-v19 as clobbers
+
+    // Decrement k
+    sub     x12,x12,#8
+
+    ldp     q18,q19,[x15],#160    // pre_tf_lo/hi_s1
+    ldr     q17,[x15],#16           // inv_shift_row
+    ldr     q16,[x15],#-176        // mask_0f
+    b       .Ldec_loop
+
+.Ldec_done:
+    // Load final CD state from mem_cd(x11) into v8-v15
+    ldp     q8,q9,[x11]
+    ldp     q10,q11,[x11,#32]
+    ldp     q12,q13,[x11,#64]
+    ldp     q14,q15,[x11,#96]
+
+    // Calculate final key pointer: &key_table[lastk] (lastk is in x8)
+    //lsl     x4,x8,#3    // lastk * 8
+    //add     x4,x0,x4    // &key_table[lastk]
+
+    // Call outunpack16: Operates in-place on v0-v15
+    outunpack16(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+                x0, v16, v17, v18, x5)
+
+    write_output(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, x1)
+
+    // === EPILOGUE ===
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+
+    ldp     x29,x30,[sp],#144
+    ret
+.size   camellia_decrypt_16blks_neon,.-camellia_decrypt_16blks_neon
