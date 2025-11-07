@@ -151,6 +151,8 @@ extern void outpack_write_neon(const uint64x2_t *mem_ab, const uint64x2_t *mem_c
 
 extern void fls16_neon(uint64x2_t *mem_ab, uint64x2_t *mem_cd, const uint64_t *keys);
 
+extern void __camellia_setup128_neon(struct camellia_simd_ctx *ctx, uint64x2_t x0);
+
 #define __m128i uint64x2_t
 
 #define vpand128(a, b, o)       (o = vandq_u64(b, a))
@@ -2247,7 +2249,11 @@ int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *vkey,
 
     case 16:
       vmovdqu128_memld(key, x0);
+#ifdef __ARM_NEON
+      __camellia_setup128_neon(ctx, x0);
+#else
       __camellia_avx_setup128(ctx, x0);
+#endif
       ctx->key_length = keylen;
       return 0;
 
