@@ -152,6 +152,7 @@ extern void outpack_write_neon(const uint64x2_t *mem_ab, const uint64x2_t *mem_c
 extern void fls16_neon(uint64x2_t *mem_ab, uint64x2_t *mem_cd, const uint64_t *keys);
 
 extern void __camellia_setup128_neon(struct camellia_simd_ctx *ctx, uint64x2_t x0);
+extern void __camellia_setup256_neon(struct camellia_simd_ctx *ctx, uint64x2_t x0, uint64x2_t x1);
 
 #define __m128i uint64x2_t
 
@@ -2274,7 +2275,11 @@ int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *vkey,
       break;
   }
 
+#ifdef __ARM_NEON
+  __camellia_setup256_neon(ctx, x0, x1);
+#else
   __camellia_avx_setup256(ctx, x0, x1);
+#endif
   ctx->key_length = keylen;
   return 0;
 }

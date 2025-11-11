@@ -1676,3 +1676,635 @@ __camellia_setup128_neon:
     ldp     x29,x30,[sp],#144
     ret
 .size __camellia_setup128_neon, .-__camellia_setup128_neon
+
+#define KR128 v1    // Input key in v1
+#define KB128 v3
+
+.text
+.globl  __camellia_setup256_neon
+.type   __camellia_setup256_neon,%function
+.align  5
+__camellia_setup256_neon:
+    stp     x29,x30,[sp,#-144]!
+    mov     x29,sp
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    // === CONSTANT LOADING ===
+    // Load constants needed for camellia_f into v17-v27 + v16(bswap)
+    adrp    x1,camellia_neon_consts
+    add     x1,x1,:lo12:camellia_neon_consts
+    ldp     q20,q21,[x1],#64    // pre_tf_lo/hi_s1
+    ldp     q22,q23,[x1],#112   // post_tf_lo/hi_s1
+    ldr     q19,[x1],#48        //mask_0f
+    ldr     q16,[x1],#16        //bswap128
+    ldr     d18,[x1],#8         //sbox4_input_mask
+    ldr     q17,[x1],#16        //inv_shift_row_and_unpcklbw
+    ldp     q24,q25,[x1],#32    //sp0044/sp1110
+    ldp     q26,q27,[x1],#32    //sp0222/sp3033
+
+    // Prepare zero vector
+    eor     v31.16b,v31.16b,v31.16b
+    
+    // === INITIAL KEY HANDLING ===
+    // Byte swap input keys KL128 & KR128 (v0 & v1) using v16
+    tbl     KL128.16b,{KL128.16b},v16.16b
+    tbl     KR128.16b,{KR128.16b},v16.16b
+    
+    // === GENERATE KA & KB(into v2 & v3) ===
+    eor     v3.16b,KL128.16b,KR128.16b
+    ext     v5.16b,KR128.16b,v31.16b,#8     // here using v5 instead of ref. v6
+    ext     v2.16b,v3.16b,v31.16b,#8
+    ext     v3.16b,v31.16b,v3.16b,#8
+    ext     v3.16b,v3.16b,v31.16b,#8
+
+    // Get addresses of sigma constants
+    // TODO: load all sigmas instead here and pass by value?
+    adrp    x1,.Lsigma1
+    add     x1,x1,:lo12:.Lsigma1 // x1 -> sigma1
+    add     x2,x1,#8             // x2 -> sigma2
+    add     x3,x1,#16            // x3 -> sigma3
+    add     x4,x1,#24            // x4 -> sigma4
+    add     x5,x1,#32            // x5 -> sigma5
+    add     x6,x1,#40            // x6 -> sigma6
+
+    camellia_f(v2,v4,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x1,x7)
+    eor     v3.16b,v4.16b,v3.16b
+    camellia_f(v3,v2,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x2,x7)
+    eor     v2.16b,v5.16b,v2.16b
+    camellia_f(v2,v3,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x3,x7)
+    eor     v3.16b,v4.16b,v3.16b
+    eor     v3.16b,KR128.16b,v3.16b
+    camellia_f(v3,v4,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x4,x7)
+
+    eor     v6.16b,v4.16b,v2.16b
+    mov     KA128.d[0],v3.d[0]
+    mov     KA128.d[1],v6.d[0]
+
+	/*
+	 * Generate KB
+	 */
+    eor     v3.16b,KA128.16b,KR128.16b
+    ext     v4.16b,v3.16b,v31.16b,#8
+    ext     v3.16b,v31.16b,v3.16b,#8
+    ext     v3.16b,v3.16b,v31.16b,#8
+
+    camellia_f(v4,v5,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x5,x7)
+    eor     v3.16b,v5.16b,v3.16b
+
+    camellia_f(v3,v5,v6,v7,v8,v9,v10,v31,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,x6,x7)
+    eor     v4.16b,v5.16b,v4.16b
+    mov     KB128.d[1],v4.d[0]
+
+    /*
+     * Generate subkeys
+     */
+    cmll_sub_addr(32, CTX, x1)
+    str     q3,[x1]     // KB128
+
+    vec_rol128(KR128, v4, 15, v15)
+    vec_rol128(KA128, v5, 15, v15)
+    vec_rol128(KR128, v6, 30, v15)
+    vec_rol128(KB128, v7, 30, v15)
+    vec_rol128(KL128, v8, 45, v15)
+    vec_rol128(KA128, v9, 45, v15)
+    vec_rol128(KL128, v10, 60, v15)
+    vec_rol128(KR128, v11, 60, v15)
+    vec_rol128(KB128, v12, 60, v15)
+
+	/* absorb kw2 to other subkeys */
+    mov     v15.d[0],KL128.d[0]
+    mov     v15.d[1],xzr
+    eor     KB128.16b,KB128.16b,v15.16b
+    eor     v4.16b,v15.16b,v4.16b
+    eor     v5.16b,v15.16b,v5.16b
+
+	/* subl(1) ^= subr(1) & ~subr(9); */
+    bic     v13.16b,v15.16b,v6.16b
+    ext     v13.16b,v31.16b,v13.16b,#4
+    ext     v13.16b,v13.16b,v31.16b,#8
+    eor     v15.16b,v13.16b,v15.16b
+	/* dw = subl(1) & subl(9), subr(1) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v6.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v31.16b,v14.16b,#8
+    ext     v14.16b,v14.16b,v31.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+
+    eor     v7.16b,v15.16b,v7.16b
+    eor     v8.16b,v15.16b,v8.16b
+    eor     v9.16b,v15.16b,v9.16b
+
+    ext     v13.16b,KL128.16b,KL128.16b,#8
+    rev64   KL128.4s,v13.4s
+    ext     v14.16b,KB128.16b,KB128.16b,#8
+    rev64   KB128.4s,v14.4s
+    ext     v13.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v13.4s
+    ext     v14.16b,v5.16b,v5.16b,#8
+    rev64   v5.4s,v14.4s
+    ext     v13.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v13.4s
+    ext     v14.16b,v7.16b,v7.16b,#8
+    rev64   v7.4s,v14.4s
+    ext     v13.16b,v8.16b,v8.16b,#8
+    rev64   v8.4s,v13.4s
+    ext     v14.16b,v9.16b,v9.16b,#8
+    rev64   v9.4s,v14.4s
+
+    cmll_sub_addr(0, CTX, x1)
+    str     q0,[x1]     // KL128
+    ext     v13.16b,KL128.16b,KL128.16b,#8
+    rev64   KL128.4s,v13.4s
+    cmll_sub_addr(2, CTX, x2)
+    str     q3,[x2]     // KB128
+    cmll_sub_addr(4, CTX, x3)
+    str     q4,[x3]
+    cmll_sub_addr(6, CTX, x4)
+    str     q5,[x4]
+    cmll_sub_addr(8, CTX, x5)
+    str     q6,[x5]
+    cmll_sub_addr(10, CTX, x6)
+    str     q7,[x6]
+    cmll_sub_addr(12, CTX, x7)
+    str     q8,[x7]
+    cmll_sub_addr(14, CTX, x1)
+    str     q9,[x1]
+
+    cmll_sub_addr(32, CTX, x2)
+    ldr     q3,[x2]     // KB128
+
+	/* subl(1) ^= subr(1) & ~subr(17); */
+    bic     v13.16b,v15.16b,v10.16b
+    ext     v13.16b,v31.16b,v13.16b,#4
+    ext     v13.16b,v13.16b,v31.16b,#8
+    eor     v15.16b,v13.16b,v15.16b
+	/* dw = subl(1) & subl(17), subr(1) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v10.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v31.16b,v14.16b,#8
+    ext     v14.16b,v14.16b,v31.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+
+    eor     v11.16b,v15.16b,v11.16b
+    eor     v12.16b,v15.16b,v12.16b
+
+    vec_ror128(KL128, v4, 128-77, v14)
+    vec_ror128(KA128, v5, 128-77, v14)
+    vec_ror128(KR128, v6, 128-94, v14)
+    vec_ror128(KA128, v7, 128-94, v14)
+    vec_ror128(KL128, v8, 128-111, v14)
+    vec_ror128(KB128, v9, 128-111, v14)
+
+    eor     v4.16b,v15.16b,v4.16b
+
+    ext     v13.16b,v10.16b,v10.16b,#8
+    rev64   v10.4s,v13.4s
+    ext     v14.16b,v11.16b,v11.16b,#8
+    rev64   v11.4s,v14.4s
+    ext     v13.16b,v12.16b,v12.16b,#8
+    rev64   v12.4s,v13.4s
+    ext     v14.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v14.4s
+
+    cmll_sub_addr(16, CTX, x1)
+    str     q10,[x1]
+    cmll_sub_addr(18, CTX, x2)
+    str     q11,[x2]
+    cmll_sub_addr(20, CTX, x3)
+    str     q12,[x3]
+    cmll_sub_addr(22, CTX, x4)
+    str     q4,[x4]
+
+	/* subl(1) ^= subr(1) & ~subr(25); */
+    bic     v13.16b,v15.16b,v5.16b
+    ext     v13.16b,v31.16b,v13.16b,#4
+    ext     v13.16b,v13.16b,v31.16b,#8
+    eor     v15.16b,v13.16b,v15.16b
+	/* dw = subl(1) & subl(25), subr(1) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v5.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v31.16b,v14.16b,#8
+    ext     v14.16b,v14.16b,v31.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+
+    eor     v6.16b,v15.16b,v6.16b
+    eor     v7.16b,v15.16b,v7.16b
+    eor     v8.16b,v15.16b,v8.16b
+    ext     v15.16b,v31.16b,v15.16b,#8
+    eor     v9.16b,v15.16b,v9.16b
+
+	/* absorb kw4 to other subkeys */
+    ext     v15.16b,v31.16b,v9.16b,#8
+    eor     v8.16b,v15.16b,v8.16b
+    eor     v7.16b,v15.16b,v7.16b
+    eor     v6.16b,v15.16b,v6.16b
+
+	/* subl(33) ^= subr(33) & ~subr(24); */
+    bic     v14.16b,v15.16b,v5.16b
+    ext     v14.16b,v31.16b,v14.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+	/* dw = subl(33) & subl(24), subr(33) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v5.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v14.16b,v31.16b,#12
+    ext     v14.16b,v31.16b,v14.16b,#8
+    eor     v15.16b,v14.16b,v15.16b
+
+    ext     v13.16b,v5.16b,v5.16b,#8
+    rev64   v5.4s,v13.4s
+    ext     v14.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v14.4s
+    ext     v13.16b,v7.16b,v7.16b,#8
+    rev64   v7.4s,v13.4s
+    ext     v14.16b,v8.16b,v8.16b,#8
+    rev64   v8.4s,v14.4s
+    ext     v13.16b,v9.16b,v9.16b,#8
+    rev64   v9.4s,v13.4s
+
+    cmll_sub_addr(24, CTX, x1)
+    str     q5,[x1]
+    cmll_sub_addr(26, CTX, x2)
+    str     q6,[x2]
+    cmll_sub_addr(28, CTX, x3)
+    str     q7,[x3]
+    cmll_sub_addr(30, CTX, x4)
+    str     q8,[x4]
+    cmll_sub_addr(32, CTX, x5)
+    str     q9,[x5]
+
+    cmll_sub_addr(22, CTX, x1)
+    ldr     q0,[x1]
+    ext     v13.16b,v0.16b,v0.16b,#8
+    rev64   v0.4s,v13.4s
+    cmll_sub_addr(20, CTX, x2)
+    ldr     q1,[x2]
+    ext     v14.16b,v1.16b,v1.16b,#8
+    rev64   v1.4s,v14.4s
+    cmll_sub_addr(18, CTX, x3)
+    ldr     q2,[x3]
+    ext     v13.16b,v2.16b,v2.16b,#8
+    rev64   v2.4s,v13.4s
+    cmll_sub_addr(16, CTX, x4)
+    ldr     q3,[x4]
+    ext     v14.16b,v3.16b,v3.16b,#8
+    rev64   v3.4s,v14.4s
+    cmll_sub_addr(14, CTX, x5)
+    ldr     q4,[x5]
+    ext     v13.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v13.4s
+    cmll_sub_addr(12, CTX, x6)
+    ldr     q5,[x6]
+    ext     v14.16b,v5.16b,v5.16b,#8
+    rev64   v5.4s,v14.4s
+    cmll_sub_addr(10, CTX, x7)
+    ldr     q6,[x7]
+    ext     v13.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v13.4s
+    cmll_sub_addr(8, CTX, x1)
+    ldr     q7,[x1]
+    ext     v14.16b,v7.16b,v7.16b,#8
+    rev64   v7.4s,v14.4s
+
+    eor     v0.16b,v15.16b,v0.16b
+    eor     v1.16b,v15.16b,v1.16b
+    eor     v2.16b,v15.16b,v2.16b
+
+	/* subl(33) ^= subr(33) & ~subr(24); */
+    bic     v14.16b,v15.16b,v3.16b
+    ext     v14.16b,v31.16b,v14.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+	/* dw = subl(33) & subl(24), subr(33) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v3.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v14.16b,v31.16b,#12
+    ext     v14.16b,v31.16b,v14.16b,#8
+    eor     v15.16b,v14.16b,v15.16b
+
+    eor     v4.16b,v15.16b,v4.16b
+    eor     v5.16b,v15.16b,v5.16b
+    eor     v6.16b,v15.16b,v6.16b
+
+    ext     v13.16b,v0.16b,v0.16b,#8
+    rev64   v0.4s,v13.4s
+    ext     v14.16b,v1.16b,v1.16b,#8
+    rev64   v1.4s,v14.4s
+    ext     v13.16b,v2.16b,v2.16b,#8
+    rev64   v2.4s,v13.4s
+    ext     v14.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v14.4s
+    ext     v13.16b,v5.16b,v5.16b,#8
+    rev64   v5.4s,v13.4s
+    ext     v14.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v14.4s
+
+    cmll_sub_addr(22, CTX, x1)
+    str     q0,[x1]
+    cmll_sub_addr(20, CTX, x2)
+    str     q1,[x2]
+    cmll_sub_addr(18, CTX, x3)
+    str     q2,[x3]
+    cmll_sub_addr(14, CTX, x4)
+    str     q4,[x4]
+    cmll_sub_addr(12, CTX, x5)
+    str     q5,[x5]
+    cmll_sub_addr(10, CTX, x6)
+    str     q6,[x6]
+
+    cmll_sub_addr(6, CTX, x1)
+    ldr     q6,[x1]
+    ext     v13.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v13.4s
+    cmll_sub_addr(4, CTX, x2)
+    ldr     q4,[x2]
+    ext     v14.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v14.4s
+    cmll_sub_addr(2, CTX, x3)
+    ldr     q2,[x3]
+    ext     v13.16b,v2.16b,v2.16b,#8
+    rev64   v2.4s,v13.4s
+    cmll_sub_addr(0, CTX, x4)
+    ldr     q0,[x4]
+    ext     v14.16b,v0.16b,v0.16b,#8
+    rev64   v0.4s,v14.4s
+
+	/* subl(33) ^= subr(33) & ~subr(24); */
+    bic     v14.16b,v15.16b,v7.16b
+    ext     v14.16b,v31.16b,v14.16b,#12
+    eor     v15.16b,v14.16b,v15.16b
+	/* dw = subl(33) & subl(24), subr(33) ^= CAMELLIA_RL1(dw); */
+    and     v14.16b,v15.16b,v7.16b
+    shl     v13.4s,v14.4s,#1
+    ushr    v14.4s,v14.4s,#31
+    add     v14.16b,v13.16b,v14.16b
+    ext     v14.16b,v14.16b,v31.16b,#12
+    ext     v14.16b,v31.16b,v14.16b,#8
+    eor     v15.16b,v14.16b,v15.16b
+
+    eor     v6.16b,v15.16b,v6.16b
+    eor     v4.16b,v15.16b,v4.16b
+    eor     v2.16b,v15.16b,v2.16b
+    eor     v0.16b,v15.16b,v0.16b
+
+    ext     v13.16b,v6.16b,v6.16b,#8
+    rev64   v6.4s,v13.4s
+    ext     v14.16b,v4.16b,v4.16b,#8
+    rev64   v4.4s,v14.4s
+    ext     v13.16b,v2.16b,v2.16b,#8
+    rev64   v2.4s,v13.4s
+    ext     v14.16b,v0.16b,v0.16b,#8
+    rev64   v0.4s,v14.4s
+
+    ext     v3.16b,v2.16b,v31.16b,#8
+    ext     v5.16b,v4.16b,v31.16b,#8
+    ext     v7.16b,v6.16b,v31.16b,#8
+
+    /*
+	 * key XOR is end of F-function.
+	 */
+    eor     v0.16b,v2.16b,v0.16b
+    eor     v2.16b,v4.16b,v2.16b
+
+    cmll_sub_addr(0, CTX, x1)
+    str     d0,[x1]
+    cmll_sub_addr(2, CTX, x2)
+    str     d3,[x2]
+    eor     v3.16b,v5.16b,v3.16b
+    eor     v4.16b,v6.16b,v4.16b
+    eor     v5.16b,v7.16b,v5.16b
+    cmll_sub_addr(3, CTX, x3)
+    str     d2,[x3]
+    cmll_sub_addr(4, CTX, x4)
+    str     d3,[x4]
+    cmll_sub_addr(5, CTX, x5)
+    str     d4,[x5]
+    cmll_sub_addr(6, CTX, x6)
+    str     d5,[x6]
+
+    cmll_sub_addr(7, CTX, x1)
+    ldr     d7,[x1]
+    cmll_sub_addr(8, CTX, x2)
+    ldr     d8,[x2]
+    cmll_sub_addr(9, CTX, x3)
+    ldr     d9,[x3]
+    cmll_sub_addr(10, CTX, x4)
+    ldr     d10,[x4]
+	/* tl = subl(10) ^ (subr(10) & ~subr(8)); */
+    bic     v15.16b,v10.16b,v8.16b
+    ext     v15.16b,v15.16b,v31.16b,#4
+    eor     v0.16b,v15.16b,v10.16b
+	/* dw = tl & subl(8), tr = subr(10) ^ CAMELLIA_RL1(dw); */
+    and     v15.16b,v8.16b,v0.16b
+    shl     v14.4s,v15.4s,#1
+    ushr    v15.4s,v15.4s,#31
+    add     v15.16b,v14.16b,v15.16b
+    ext     v15.16b,v31.16b,v15.16b,#4
+    ext     v15.16b,v15.16b,v31.16b,#8
+    eor     v0.16b,v15.16b,v0.16b
+
+    eor     v6.16b,v0.16b,v6.16b
+    cmll_sub_addr(7, CTX, x1)
+    str     d6,[x1]
+
+    cmll_sub_addr(11, CTX, x2)
+    ldr     d11,[x2]
+    cmll_sub_addr(12, CTX, x3)
+    ldr     d12,[x3]
+    cmll_sub_addr(13, CTX, x4)
+    ldr     d13,[x4]
+    cmll_sub_addr(14, CTX, x5)
+    ldr     d14,[x5]
+    cmll_sub_addr(15, CTX, x6)
+    ldr     d15,[x6]
+	/* tl = subl(7) ^ (subr(7) & ~subr(9)); */
+    bic     v1.16b,v7.16b,v9.16b
+    ext     v1.16b,v1.16b,v31.16b,#4
+    eor     v0.16b,v1.16b,v7.16b
+	/* dw = tl & subl(9), tr = subr(7) ^ CAMELLIA_RL1(dw); */
+    and     v1.16b,v9.16b,v0.16b
+    shl     v2.4s,v1.4s,#1
+    ushr    v1.4s,v1.4s,#31
+    add     v1.16b,v2.16b,v1.16b
+    ext     v1.16b,v31.16b,v1.16b,#4
+    ext     v1.16b,v1.16b,v31.16b,#8
+    eor     v0.16b,v1.16b,v0.16b
+
+    eor     v0.16b,v11.16b,v0.16b
+    eor     v10.16b,v12.16b,v10.16b
+    eor     v11.16b,v13.16b,v11.16b
+    eor     v12.16b,v14.16b,v12.16b
+    eor     v13.16b,v15.16b,v13.16b
+    cmll_sub_addr(10, CTX, x1)
+    str     d0,[x1]
+    cmll_sub_addr(11, CTX, x2)
+    str     d10,[x2]
+    cmll_sub_addr(12, CTX, x3)
+    str     d11,[x3]
+    cmll_sub_addr(13, CTX, x4)
+    str     d12,[x4]
+    cmll_sub_addr(14, CTX, x5)
+    str     d13,[x5]
+
+    cmll_sub_addr(16, CTX, x1)
+    ldr     d6,[x1]
+    cmll_sub_addr(17, CTX, x2)
+    ldr     d7,[x2]
+    cmll_sub_addr(18, CTX, x3)
+    ldr     d8,[x3]
+    cmll_sub_addr(19, CTX, x4)
+    ldr     d9,[x4]
+    cmll_sub_addr(20, CTX, x5)
+    ldr     d10,[x5]
+	/* tl = subl(18) ^ (subr(18) & ~subr(16)); */
+    bic     v1.16b,v8.16b,v6.16b
+    ext     v1.16b,v1.16b,v31.16b,#4
+    eor     v0.16b,v1.16b,v8.16b
+	/* dw = tl & subl(16), tr = subr(18) ^ CAMELLIA_RL1(dw); */
+    and     v1.16b,v6.16b,v0.16b
+    shl     v2.4s,v1.4s,#1
+    ushr    v1.4s,v1.4s,#31
+    add     v1.16b,v2.16b,v1.16b
+    ext     v1.16b,v31.16b,v1.16b,#4
+    ext     v1.16b,v1.16b,v31.16b,#8
+    eor     v0.16b,v1.16b,v0.16b
+
+    eor     v0.16b,v14.16b,v0.16b
+    cmll_sub_addr(15, CTX, x1)
+    str     d0,[x1]
+
+	/* tl = subl(15) ^ (subr(15) & ~subr(17)); */
+    bic     v1.16b,v15.16b,v7.16b
+    ext     v1.16b,v1.16b,v31.16b,#4
+    eor     v0.16b,v1.16b,v15.16b
+	/* dw = tl & subl(17), tr = subr(15) ^ CAMELLIA_RL1(dw); */
+    and     v1.16b,v7.16b,v0.16b
+    shl     v2.4s,v1.4s,#1
+    ushr    v1.4s,v1.4s,#31
+    add     v1.16b,v2.16b,v1.16b
+    ext     v1.16b,v31.16b,v1.16b,#4
+    ext     v1.16b,v1.16b,v31.16b,#8
+    eor     v0.16b,v1.16b,v0.16b
+
+    cmll_sub_addr(21, CTX, x1)
+    ldr     d1,[x1]
+    cmll_sub_addr(22, CTX, x2)
+    ldr     d2,[x2]
+    cmll_sub_addr(23, CTX, x3)
+    ldr     d3,[x3]
+    cmll_sub_addr(24, CTX, x4)
+    ldr     d4,[x4]
+
+    eor     v0.16b,v9.16b,v0.16b
+    eor     v8.16b,v10.16b,v8.16b
+    eor     v9.16b,v1.16b,v9.16b
+    eor     v10.16b,v2.16b,v10.16b
+    eor     v1.16b,v3.16b,v1.16b
+
+    cmll_sub_addr(18, CTX, x1)
+    str     d0,[x1]
+    cmll_sub_addr(19, CTX, x2)
+    str     d8,[x2]
+    cmll_sub_addr(20, CTX, x3)
+    str     d9,[x3]
+    cmll_sub_addr(21, CTX, x4)
+    str     d10,[x4]
+    cmll_sub_addr(22, CTX, x5)
+    str     d1,[x5]
+
+    cmll_sub_addr(25, CTX, x1)
+    ldr     d5,[x1]
+    cmll_sub_addr(26, CTX, x2)
+    ldr     d6,[x2]
+    cmll_sub_addr(27, CTX, x3)
+    ldr     d7,[x3]
+    cmll_sub_addr(28, CTX, x4)
+    ldr     d8,[x4]
+    cmll_sub_addr(29, CTX, x5)
+    ldr     d9,[x5]
+    cmll_sub_addr(30, CTX, x6)
+    ldr     d10,[x6]
+    cmll_sub_addr(31, CTX, x7)
+    ldr     d11,[x7]
+    cmll_sub_addr(32, CTX, x1)
+    ldr     d12,[x1]
+
+	/* tl = subl(26) ^ (subr(26) & ~subr(24)); */
+    bic     v15.16b,v6.16b,v4.16b
+    ext     v15.16b,v15.16b,v31.16b,#4
+    eor     v0.16b,v15.16b,v6.16b
+	/* dw = tl & subl(26), tr = subr(24) ^ CAMELLIA_RL1(dw); */
+    and     v15.16b,v4.16b,v0.16b
+    shl     v14.4s,v15.4s,#1
+    ushr    v15.4s,v15.4s,#31
+    add     v15.16b,v14.16b,v15.16b
+    ext     v15.16b,v31.16b,v15.16b,#4
+    ext     v15.16b,v15.16b,v31.16b,#8
+    eor     v0.16b,v15.16b,v0.16b
+
+    eor     v2.16b,v0.16b,v2.16b
+    cmll_sub_addr(23, CTX, x1)
+    str     d2,[x1]
+
+	/* tl = subl(23) ^ (subr(23) &  ~subr(25)); */
+    bic     v15.16b,v3.16b,v5.16b
+    ext     v15.16b,v15.16b,v31.16b,#4
+    eor     v0.16b,v15.16b,v3.16b
+	/* dw = tl & subl(26), tr = subr(24) ^ CAMELLIA_RL1(dw); */
+    and     v15.16b,v5.16b,v0.16b
+    shl     v14.4s,v15.4s,#1
+    ushr    v15.4s,v15.4s,#31
+    add     v15.16b,v14.16b,v15.16b
+    ext     v15.16b,v31.16b,v15.16b,#4
+    ext     v15.16b,v15.16b,v31.16b,#8
+    eor     v0.16b,v15.16b,v0.16b
+
+    eor     v0.16b,v7.16b,v0.16b
+    eor     v6.16b,v8.16b,v6.16b
+    eor     v7.16b,v9.16b,v7.16b
+    eor     v8.16b,v10.16b,v8.16b
+    eor     v9.16b,v11.16b,v9.16b
+    eor     v11.16b,v12.16b,v11.16b
+
+    cmll_sub_addr(26, CTX, x1)
+    str     d0,[x1]
+    cmll_sub_addr(27, CTX, x2)
+    str     d6,[x2]
+    cmll_sub_addr(28, CTX, x3)
+    str     d7,[x3]
+    cmll_sub_addr(29, CTX, x4)
+    str     d8,[x4]
+    cmll_sub_addr(30, CTX, x5)
+    str     d9,[x5]
+    cmll_sub_addr(31, CTX, x6)
+    str     d10,[x6]
+    cmll_sub_addr(32, CTX, x7)
+    str     d11,[x7]
+
+    mov     x1, #0
+    cmll_sub_addr(1, CTX, x2)
+    str     x1,[x2]
+    cmll_sub_addr(33, CTX, x3)
+    str     x1,[x3]
+
+    // === EPILOGUE ===
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+    ldp     x29,x30,[sp],#144
+
+    ret
+
+.size __camellia_setup256_neon,.-__camellia_setup256_neon
