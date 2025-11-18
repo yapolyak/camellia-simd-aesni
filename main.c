@@ -36,6 +36,11 @@ extern void camellia_decrypt_1blk_neon(
     void *vout,
     const void *vin
 );
+extern int  camellia_keysetup_neon(
+    struct camellia_simd_ctx *ctx,
+    const void *vkey,
+    unsigned int keylen
+);
 #else
 extern void camellia_encrypt_asm(
     struct camellia_simd_ctx *ctx,
@@ -200,7 +205,7 @@ static void do_selftest(void)
   printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 128);
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_128, 128 / 8);
   camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
   assert(memcmp(tmp, test_vector_ciphertext_128, 16) == 0);
   camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
@@ -209,7 +214,7 @@ static void do_selftest(void)
   printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 192);
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_192, 192 / 8);
   camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
   assert(memcmp(tmp, test_vector_ciphertext_192, 16) == 0);
   camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
@@ -218,7 +223,7 @@ static void do_selftest(void)
   printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 256);
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_256, 256 / 8);
   camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
   assert(memcmp(tmp, test_vector_ciphertext_256, 16) == 0);
   camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
@@ -259,10 +264,11 @@ static void do_selftest(void)
 
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
 #ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_128, 128 / 8);
   camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
 #else
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
 #endif
 
@@ -279,10 +285,11 @@ static void do_selftest(void)
   printf("selftest: checking 16-block parallel camellia-192/SIMD128 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
 #ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_192, 192 / 8);
   camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
 #else
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
 #endif
   for (i = 0; i < 16; i++) {
@@ -298,10 +305,11 @@ static void do_selftest(void)
   printf("selftest: checking 16-block parallel camellia-256/SIMD128 against test vectors...\n");
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
-  camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
 #ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_256, 256 / 8);
   camellia_encrypt_16blks_neon(&ctx_simd, tmp, plaintext_simd);
 #else
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
   camellia_encrypt_16blks_simd128(&ctx_simd, tmp, plaintext_simd);
 #endif
   for (i = 0; i < 16; i++) {
@@ -381,7 +389,7 @@ static void do_selftest(void)
 #ifdef __ARM_NEON
   /* Test 1-block NEON implementation against large test vectors. */
   printf("selftest: checking 1-block neon camellia-128 against large test vectors...\n");
-  camellia_keysetup_simd128(&ctx_simd, key, 128 / 8);
+  camellia_keysetup_neon(&ctx_simd, key, 128 / 8);
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   
   for (i = 0; i < (1 << 16); i++) {
@@ -406,7 +414,7 @@ static void do_selftest(void)
 
   // Now do the 256-bit key
   printf("selftest: checking 1-block neon camellia-256 against large test vectors...\n");
-  camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
+  camellia_keysetup_neon(&ctx_simd, key, 256 / 8);
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
     for (j = 0; j < 16; j++) {
@@ -424,7 +432,11 @@ static void do_selftest(void)
 
   /* Test 16-block SIMD128 implementation against large test vectors. */
   printf("selftest: checking 16-block parallel camellia-128/SIMD128 against large test vectors...\n");
+#ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, key, 128 / 8);
+#else
   camellia_keysetup_simd128(&ctx_simd, key, 128 / 8);
+#endif
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
 #ifdef __ARM_NEON
@@ -444,7 +456,11 @@ static void do_selftest(void)
   assert(memcmp(tmp, ref_large_plaintext, 16 * 16) == 0);
 
   printf("selftest: checking 16-block parallel camellia-256/SIMD128 against large test vectors...\n");
+#ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, key, 256 / 8);
+#else
   camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
+#endif
   memcpy(tmp, ref_large_plaintext, 16 * 16);
   for (i = 0; i < (1 << 16); i++) {
 #ifdef __ARM_NEON
@@ -555,7 +571,11 @@ static void do_speedtest(void)
 
   /* Test speed of 16-block SIMD128 implementation. */
   total_bytes = 0;
+#ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_128, 128 / 8);
+#else
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
+#endif
 
   start_time = curr_clock_nsecs();
   do {
@@ -575,7 +595,11 @@ static void do_speedtest(void)
 	       total_bytes, end_time - start_time);
 
   total_bytes = 0;
+#ifdef __ARM_NEON
+  camellia_keysetup_neon(&ctx_simd, test_vector_key_128, 128 / 8);
+#else
   camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
+#endif
 
   start_time = curr_clock_nsecs();
   do {

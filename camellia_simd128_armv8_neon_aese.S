@@ -3246,3 +3246,50 @@ __camellia_setup256_neon:
     ret
 
 .size __camellia_setup256_neon,.-__camellia_setup256_neon
+
+.global camellia_keysetup_neon
+.type   camellia_keysetup_neon, %function
+.align  4
+camellia_keysetup_neon:
+    // Input:
+    //   x0: ctx (struct camellia_simd_ctx *)
+    //   x1: key (const unsigned char *)
+    //   x2: keylen (int) - 16, 24, or 32
+
+    // Store key_length into ctx->key_length
+    // Offset is 272 (68 * 4 bytes for key_table)
+    str     w2,[x0,#272]
+
+    // Load the first 128 bits of the key into v0
+    ldr     q0,[x1]
+
+    // Check key length
+    cmp     w2,#24
+    b.lt    .Lsetup_128    // keylen < 24 (i.e., 16)
+    b.eq    .Lsetup_192    // keylen == 24
+
+    // === 256-bit Case ===
+    // Load the second 128 bits into v1
+    ldr     q1,[x1,#16]
+    // Tail call to setup256
+    b       __camellia_setup256_neon
+
+.Lsetup_192:
+    // === 192-bit Case ===
+    // Camellia 192 treats the second half as: [ K[16..23] | ~K[16..23] ]
+    // Load the 64 bits of K_R into a GPR
+    ldr     x3,[x1,#16]
+    // Create the complement (~K_R)
+    mvn     x4,x3
+    // Assemble v1: Lower 64 = K_R, Upper 64 = ~K_R
+    mov     v1.d[0],x3
+    mov     v1.d[1],x4
+    // Tail call to setup256
+    b       __camellia_setup256_neon
+
+.Lsetup_128:
+    // === 128-bit Case ===
+    // Tail call to setup128
+    b       __camellia_setup128_neon
+
+.size   camellia_keysetup_neon, .-camellia_keysetup_neon
