@@ -84,7 +84,7 @@ test_simd256_intrinsics_x86_64_gfni_avx512: camellia_simd128_with_x86_aesni_avx5
 test_simd128_asm_x86_64: camellia_simd128_x86-64_aesni_avx.o \
 			 main_simd128.o \
 			 camellia_ref_x86-64.o
-	$(CC_X86_64) $^ -o $@ $(LDFLAGS)
+	$(CC_X86_64)  -fno-pie $^ -o $@ $(LDFLAGS) -no-pie
 
 test_simd256_asm_x86_64: camellia_simd128_x86-64_aesni_avx.o \
 			 camellia_simd256_x86-64_aesni_avx2.o \

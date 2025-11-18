@@ -15,11 +15,280 @@
  *   http://urn.fi/URN:NBN:fi:oulu-201305311409
  */
 
+.text
+
+.extern camellia_sp10011110;
+.extern camellia_sp22000222;
+.extern camellia_sp03303033;
+.extern camellia_sp00444404;
+.extern camellia_sp02220222;
+.extern camellia_sp30333033;
+.extern camellia_sp44044404;
+.extern camellia_sp11101110;
+
+#define sp10011110 camellia_sp10011110
+#define sp22000222 camellia_sp22000222
+#define sp03303033 camellia_sp03303033
+#define sp00444404 camellia_sp00444404
+#define sp02220222 camellia_sp02220222
+#define sp30333033 camellia_sp30333033
+#define sp44044404 camellia_sp44044404
+#define sp11101110 camellia_sp11101110
+
 #define CAMELLIA_TABLE_BYTE_LEN 272
 
 /* struct CAMELLIA_context: */
 #define key_table 0
 #define key_length CAMELLIA_TABLE_BYTE_LEN
+
+/* register macros */
+#define CTX %rdi
+#define RIO %rsi
+#define RIOd %esi
+
+#define RAB0 %rax
+#define RCD0 %rcx
+#define RAB1 %rbx
+#define RCD1 %rdx
+
+#define RAB0d %eax
+#define RCD0d %ecx
+#define RAB1d %ebx
+#define RCD1d %edx
+
+#define RAB0bl %al
+#define RCD0bl %cl
+#define RAB1bl %bl
+#define RCD1bl %dl
+
+#define RAB0bh %ah
+#define RCD0bh %ch
+#define RAB1bh %bh
+#define RCD1bh %dh
+
+#define RT0 %rsi
+#define RT1 %rbp
+#define RT2 %r8
+
+#define RT0d %esi
+#define RT1d %ebp
+#define RT2d %r8d
+
+#define RT2bl %r8b
+
+#define RXOR %r9
+#define RRBP %r10
+#define RDST %r11
+
+#define RXORd %r9d
+#define RXORbl %r9b
+
+#define xor2ror16(T0, T1, tmp1, tmp2, ab, dst) \
+	movzbl ab ## bl,		tmp2 ## d; \
+	movzbl ab ## bh,		tmp1 ## d; \
+	rorq $16,			ab; \
+	xorq T0(, tmp2, 8),		dst; \
+	xorq T1(, tmp1, 8),		dst;
+
+/**********************************************************************
+  1-way camellia
+ **********************************************************************/
+#define roundsm(ab, cd) \
+	xor2ror16(sp00444404, sp03303033, RT0, RT1, ab ## 0, cd ## 0); \
+	xor2ror16(sp22000222, sp10011110, RT0, RT1, ab ## 0, RT2); \
+	xor2ror16(sp11101110, sp44044404, RT0, RT1, ab ## 0, cd ## 0); \
+	xor2ror16(sp30333033, sp02220222, RT0, RT1, ab ## 0, RT2); \
+	\
+	xorq RT2,					cd ## 0;
+
+#define roundsm_ab_to_cd(subkey) \
+	movq (key_table + ((subkey) * 2) * 4)(CTX),	RT2; \
+	roundsm(RAB, RCD);
+
+#define roundsm_cd_to_ab(subkey) \
+	movq (key_table + ((subkey) * 2) * 4)(CTX),	RT2; \
+	roundsm(RCD, RAB);
+
+#define fls(l, r, kl, kr) \
+	movl (key_table + ((kl) * 2) * 4)(CTX),		RT0d; \
+	andl l ## 0d,					RT0d; \
+	roll $1,					RT0d; \
+	shlq $32,					RT0; \
+	xorq RT0,					l ## 0; \
+	movq (key_table + ((kr) * 2) * 4)(CTX),		RT1; \
+	orq r ## 0,					RT1; \
+	shrq $32,					RT1; \
+	xorq RT1,					r ## 0; \
+	\
+	movq (key_table + ((kl) * 2) * 4)(CTX),		RT2; \
+	orq l ## 0,					RT2; \
+	shrq $32,					RT2; \
+	xorq RT2,					l ## 0; \
+	movl (key_table + ((kr) * 2) * 4)(CTX),		RT0d; \
+	andl r ## 0d,					RT0d; \
+	roll $1,					RT0d; \
+	shlq $32,					RT0; \
+	xorq RT0,					r ## 0;
+
+#define fls_(l, r, kl, kr) \
+	movl kl ## d,					RT0d; \
+	andl l ## 0d,					RT0d; \
+	roll $1,					RT0d; \
+	shlq $32,					RT0; \
+	xorq RT0,					l ## 0; \
+	movq kr,					RT1; \
+	orq r ## 0,					RT1; \
+	shrq $32,					RT1; \
+	xorq RT1,					r ## 0; \
+	\
+	movq kl,					RT2; \
+	orq l ## 0,					RT2; \
+	shrq $32,					RT2; \
+	xorq RT2,					l ## 0; \
+	movl kr ## d,					RT0d; \
+	andl r ## 0d,					RT0d; \
+	roll $1,					RT0d; \
+	shlq $32,					RT0; \
+	xorq RT0,					r ## 0;
+
+#define enc_rounds(i) \
+	roundsm_ab_to_cd(i + 2); \
+	roundsm_cd_to_ab(i + 3); \
+	roundsm_ab_to_cd(i + 4); \
+	roundsm_cd_to_ab(i + 5); \
+	roundsm_ab_to_cd(i + 6); \
+	roundsm_cd_to_ab(i + 7);
+
+#define enc_fls(i) \
+	fls(RAB, RCD, i + 0, i + 1);
+
+#define enc_inpack() \
+	movq (RIO),			RAB0; \
+	bswapq				RAB0; \
+	rolq $32,			RAB0; \
+	movq 4*2(RIO),			RCD0; \
+	bswapq				RCD0; \
+	rorq $32,			RCD0; \
+	xorq key_table(CTX),		RAB0;
+
+#define enc_outunpack(op, max) \
+	xorq key_table(CTX, max, 8),	RCD0; \
+	rorq $32,			RCD0; \
+	bswapq				RCD0; \
+	op ## q RCD0,			(RIO); \
+	rolq $32,			RAB0; \
+	bswapq				RAB0; \
+	op ## q RAB0,			4*2(RIO);
+
+#define dec_rounds(i) \
+	roundsm_ab_to_cd(i + 7); \
+	roundsm_cd_to_ab(i + 6); \
+	roundsm_ab_to_cd(i + 5); \
+	roundsm_cd_to_ab(i + 4); \
+	roundsm_ab_to_cd(i + 3); \
+	roundsm_cd_to_ab(i + 2);
+
+#define dec_fls(i) \
+	fls(RAB, RCD, i + 1, i + 0);
+
+#define dec_inpack(max) \
+	movq (RIO),			RAB0; \
+	bswapq				RAB0; \
+	rolq $32,			RAB0; \
+	movq 4*2(RIO),			RCD0; \
+	bswapq				RCD0; \
+	rorq $32,			RCD0; \
+	xorq key_table(CTX, max, 8),	RAB0;
+
+#define dec_outunpack() \
+	xorq key_table(CTX),		RCD0; \
+	rorq $32,			RCD0; \
+	bswapq				RCD0; \
+	movq RCD0,			(RIO); \
+	rolq $32,			RAB0; \
+	bswapq				RAB0; \
+	movq RAB0,			4*2(RIO);
+
+.global camellia_encrypt_asm;
+.type   camellia_encrypt_asm,@function;
+
+camellia_encrypt_asm:
+	/* input:
+	 *	%rdi: ctx, CTX
+	 *	%rsi: dst
+	 *	%rdx: src
+	 */
+	movq %rbp, RRBP;
+
+	movq %rsi, RDST;
+	movq %rdx, RIO;
+
+	enc_inpack();
+
+	enc_rounds(0);
+	enc_fls(8);
+	enc_rounds(8);
+	enc_fls(16);
+	enc_rounds(16);
+	movl $24, RT1d; /* max */
+
+	cmpb $16, key_length(CTX);
+	je __enc_done;
+
+	enc_fls(24);
+	enc_rounds(24);
+	movl $32, RT1d; /* max */
+
+__enc_done:
+	movq RDST, RIO;
+
+	enc_outunpack(mov, RT1);
+
+	movq RRBP, %rbp;
+	ret;
+
+.global camellia_decrypt_asm;
+.type   camellia_decrypt_asm,@function;
+
+camellia_decrypt_asm:
+	/* input:
+	 *	%rdi: ctx, CTX
+	 *	%rsi: dst
+	 *	%rdx: src
+	 */
+	cmpl $16, key_length(CTX);
+	movl $32, RT2d;
+	movl $24, RXORd;
+	cmovel RXORd, RT2d; /* max */
+
+	movq %rbp, RRBP;
+	movq %rsi, RDST;
+	movq %rdx, RIO;
+
+	dec_inpack(RT2);
+
+	cmpb $24, RT2bl;
+	je __dec_rounds16;
+
+	dec_rounds(24);
+	dec_fls(24);
+
+__dec_rounds16:
+	dec_rounds(16);
+	dec_fls(16);
+	dec_rounds(8);
+	dec_fls(8);
+	dec_rounds(0);
+
+	movq RDST, RIO;
+
+	dec_outunpack();
+
+	movq RRBP, %rbp;
+	ret;
+
+#undef RIO
+
 
 /* register macros */
 #define CTX %rdi

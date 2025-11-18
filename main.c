@@ -13,6 +13,7 @@
 #include "camellia-BSD-1.2.0/camellia.h"
 #include "camellia_simd.h"
 
+
 #ifdef __ARM_NEON
 // Declare the assembly function
 extern void camellia_encrypt_16blks_neon(
@@ -21,6 +22,27 @@ extern void camellia_encrypt_16blks_neon(
     const void *vin
 );
 extern void camellia_decrypt_16blks_neon(
+    struct camellia_simd_ctx *ctx,
+    void *vout,
+    const void *vin
+);
+extern void camellia_encrypt_1blk_neon(
+    struct camellia_simd_ctx *ctx,
+    void *vout,
+    const void *vin
+);
+extern void camellia_decrypt_1blk_neon(
+    struct camellia_simd_ctx *ctx,
+    void *vout,
+    const void *vin
+);
+#else
+extern void camellia_encrypt_asm(
+    struct camellia_simd_ctx *ctx,
+    void *vout,
+    const void *vin
+);
+extern void camellia_decrypt_asm(
     struct camellia_simd_ctx *ctx,
     void *vout,
     const void *vin
@@ -172,6 +194,65 @@ static void do_selftest(void)
   Camellia_decrypt(tmp, tmp, &ctx_ref);
   assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
 
+
+#ifdef __ARM_NEON
+  /* Check test vectors against 1-block NEON implementation. */
+  printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 128);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
+  camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_128, 16) == 0);
+  camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+
+  printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 192);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
+  camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_192, 16) == 0);
+  camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+
+  printf("selftest: comparing camellia-%d test vectors against 1-block NEON implementation...\n", 256);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
+  camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_256, 16) == 0);
+  camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+#else
+  /* Check test vectors against 1-block x86_64 implementation. */
+  printf("selftest: comparing camellia-%d test vectors against 1-block x86_64 implementation...\n", 128);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_128, 128 / 8);
+  camellia_encrypt_asm(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_128, 16) == 0);
+  camellia_decrypt_asm(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+
+  printf("selftest: comparing camellia-%d test vectors against 1-block x86_64 implementation...\n", 192);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_192, 192 / 8);
+  camellia_encrypt_asm(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_192, 16) == 0);
+  camellia_decrypt_asm(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+
+  printf("selftest: comparing camellia-%d test vectors against 1-block x86_64 implementation...\n", 256);
+  memset(tmp, 0xaa, sizeof(tmp));
+  memset(&ctx_simd, 0xff, sizeof(ctx_simd));
+  camellia_keysetup_simd128(&ctx_simd, test_vector_key_256, 256 / 8);
+  camellia_encrypt_asm(&ctx_simd, tmp, test_vector_plaintext);
+  assert(memcmp(tmp, test_vector_ciphertext_256, 16) == 0);
+  camellia_decrypt_asm(&ctx_simd, tmp, tmp);
+  assert(memcmp(tmp, test_vector_plaintext, 16) == 0);
+#endif
+
   /* Check 16-block SIMD128 implementation against known test vectors. */
   printf("selftest: checking 16-block parallel camellia-128/SIMD128 against test vectors...\n");
   fill_blks(plaintext_simd, test_vector_plaintext, 16);
@@ -296,6 +377,50 @@ static void do_selftest(void)
 		       &ref_large_ciphertext_256[i * 16], &ctx_ref);
     }
   }
+
+#ifdef __ARM_NEON
+  /* Test 1-block NEON implementation against large test vectors. */
+  printf("selftest: checking 1-block neon camellia-128 against large test vectors...\n");
+  camellia_keysetup_simd128(&ctx_simd, key, 128 / 8);
+  memcpy(tmp, ref_large_plaintext, 16 * 16);
+  
+  for (i = 0; i < (1 << 16); i++) {
+    for (j = 0; j < 16; j++) {
+      camellia_encrypt_1blk_neon(&ctx_simd, 
+                                 &tmp[j * 16],  // out
+                                 &tmp[j * 16]); // in
+    }
+  }
+  // The result must be identical to the reference C-generated ciphertext
+  assert(memcmp(tmp, ref_large_ciphertext_128, 16 * 16) == 0);
+
+  // Now test 1-block decryption
+  for (i = 0; i < (1 << 16); i++) {
+    for (j = 0; j < 16; j++) {
+      camellia_decrypt_1blk_neon(&ctx_simd,
+                                 &tmp[j * 16],
+                                 &tmp[j * 16]);
+    }
+  }
+  assert(memcmp(tmp, ref_large_plaintext, 16 * 16) == 0);
+
+  // Now do the 256-bit key
+  printf("selftest: checking 1-block neon camellia-256 against large test vectors...\n");
+  camellia_keysetup_simd128(&ctx_simd, key, 256 / 8);
+  memcpy(tmp, ref_large_plaintext, 16 * 16);
+  for (i = 0; i < (1 << 16); i++) {
+    for (j = 0; j < 16; j++) {
+      camellia_encrypt_1blk_neon(&ctx_simd, &tmp[j * 16], &tmp[j * 16]);
+    }
+  }
+  assert(memcmp(tmp, ref_large_ciphertext_256, 16 * 16) == 0);
+  for (i = 0; i < (1 << 16); i++) {
+    for (j = 0; j < 16; j++) {
+      camellia_decrypt_1blk_neon(&ctx_simd, &tmp[j * 16], &tmp[j * 16]);
+    }
+  }
+  assert(memcmp(tmp, ref_large_plaintext, 16 * 16) == 0);
+#endif
 
   /* Test 16-block SIMD128 implementation against large test vectors. */
   printf("selftest: checking 16-block parallel camellia-128/SIMD128 against large test vectors...\n");
