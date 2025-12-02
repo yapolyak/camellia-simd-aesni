@@ -54,6 +54,34 @@ extern void camellia_decrypt_asm(
 );
 #endif
 
+void print_key_schedule_simd(const struct camellia_simd_ctx *ctx)
+{
+    // Determine number of pairs to print based on the stored key_length.
+    // 16 bytes (128 bit) = 26 subkey pairs (indices 0-25)
+    // 24/32 bytes (192/256 bit) = 34 subkey pairs (indices 0-33)
+    int num_pairs_to_print;
+    
+    if (ctx->key_length <= 16) {
+        num_pairs_to_print = 26;
+    } else {
+        num_pairs_to_print = 34;
+    }
+
+    printf("\n--- GENERATED OPTIMIZED KEY SCHEDULE (ASM Context) ---\n");
+    printf(" Index | Subkey Value (64-bit Hex)\n");
+    printf("----------------------------------------------------\n");
+    
+    for (int i = 0; i < num_pairs_to_print; ++i) {
+        // key_table is already an array of uint64_t, making access straightforward.
+        printf(" %04d | %016llX\n", i, ctx->key_table[i]);
+    }
+
+    // Print the metadata integer, which your assembly wrote to offset 272.
+    printf("----------------------------------------------------\n");
+    printf(" Key Length (Metadata @ Offset 272): %d bytes\n", ctx->key_length);
+    printf("----------------------------------------------------\n");
+}
+
 static const uint8_t test_vector_plaintext[] = {
   0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,
   0xfe,0xdc,0xba,0x98,0x76,0x54,0x32,0x10
@@ -206,6 +234,7 @@ static void do_selftest(void)
   memset(tmp, 0xaa, sizeof(tmp));
   memset(&ctx_simd, 0xff, sizeof(ctx_simd));
   camellia_keysetup_neon(&ctx_simd, test_vector_key_128, 128 / 8);
+  //print_key_schedule_simd(&ctx_simd);
   camellia_encrypt_1blk_neon(&ctx_simd, tmp, test_vector_plaintext);
   assert(memcmp(tmp, test_vector_ciphertext_128, 16) == 0);
   camellia_decrypt_1blk_neon(&ctx_simd, tmp, tmp);
