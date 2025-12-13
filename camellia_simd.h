@@ -23,19 +23,31 @@ struct camellia_simd_ctx
 int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *key,
 			      unsigned int keylen);
 
-/* SIMD128 vector implementation of Camellia. These are 128-bit vector
+/* SIMD128 vector implementation check for 1-way implementation */
+int have_camellia_1blk_simd128(void);
+
+/* 1-block SIMD128 vector implementation of Camellia. These are 128-bit vector
  * variants (on x86, AES-NI + SSE4.1/AVX). IN is pointer to 16 plaintext
  * blocks and OUT is pointer to 16 ciphertext blocks. OUT and IN may be
  * unaligned. */
+void camellia_encrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
+				   const void *in);
+void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
+				   const void *in);
+
+/* 16-block parallel SIMD128 vector implementation of Camellia. These are
+ * 128-bit vector variants (on x86, AES-NI + SSE4.1/AVX). IN is pointer to
+ * 16 plaintext blocks and OUT is pointer to 16 ciphertext blocks. OUT and IN
+ * may be unaligned. */
 void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *out,
 				     const void *in);
 void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *out,
 				  const void *in);
 
-/* SIMD256 vector implementation of Camellia. These are 256-bit vector
- * variants (on x86, AES-NI / AVX2). IN is pointer to 32 plaintext
- * blocks and OUT is pointer to 32 ciphertext blocks. OUT and IN may be
- * unaligned. */
+/* 32-block parallel SIMD256 vector implementation of Camellia. These are
+ * 256-bit vector variants (on x86, AES-NI / AVX2). IN is pointer to 32
+ * plaintext blocks and OUT is pointer to 32 ciphertext blocks. OUT and IN may
+ * be unaligned. */
 void camellia_encrypt_32blks_simd256(struct camellia_simd_ctx *ctx, void *out,
 				     const void *in);
 void camellia_decrypt_32blks_simd256(struct camellia_simd_ctx *ctx, void *out,

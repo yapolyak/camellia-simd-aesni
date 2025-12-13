@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020,2023 Jussi Kivilinna <jussi.kivilinna@iki.fi>
+ * Copyright (C) 2020,2023,2025 Jussi Kivilinna <jussi.kivilinna@iki.fi>
  *
  * SPDX-License-Identifier: MIT
  */
@@ -881,26 +881,30 @@ camellia_decrypt_16blks_simd128:
 	vzeroall;
 	ret;
 
-/*
- * IN:
- *  ab: 64-bit AB state
- *  cd: 64-bit CD state
- */
-#define camellia_f(ab, x, t0, t1, t2, t3, t4, inv_shift_row, sbox4mask, \
-		   _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, key) \
-	vmovq key, t0; \
-	vpxor x, x, t3; \
-	\
-	vpxor ab, t0, x; \
+/**********************************************************************
+  1-way camellia
+ **********************************************************************/
+
+#if defined(USE_AVX512) && defined(USE_GFNI)
+#define USE_AVX512_GFNI
+#endif
+
+/* Camellia F function, AVX+AESNI version */
+#define camellia_f_core(ab, x, t0, t1, t2, t3, t4, \
+			 inv_shift_row_n_s2n3_shuffle, sbox4mask, \
+			 _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, \
+			 sp1mask, sp2mask, sp3mask, sp4mask, fn_out_xor, \
+			 out_xor_dst) \
+	vpxor t3, t3, t3; \
 	\
 	/* \
 	 * S-function with AES subbytes \
 	 */ \
 	\
 	/* input rotation for sbox4 (<<< 1) */ \
-	vpand x, sbox4mask, t0; \
-	vpandn x, sbox4mask, x; \
-	vpaddw t0, t0, t1; \
+	vpand ab, sbox4mask, t0; \
+	vpandn ab, sbox4mask, x; \
+	vpaddb t0, t0, t1; \
 	vpsrlw $7, t0, t0; \
 	vpor t0, t1, t0; \
 	vpand sbox4mask, t0, t0; \
@@ -912,7 +916,7 @@ camellia_decrypt_16blks_simd128:
 	/* prefilter sboxes */ \
 	filter_8bit(x, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
 	\
-	/* AES subbytes + AES shift rows + AES inv shift rows */ \
+	/* AES subbytes + AES shift rows */ \
 	vaesenclast t3, x, x; \
 	\
 	/* postfilter sboxes */ \
@@ -920,23 +924,446 @@ camellia_decrypt_16blks_simd128:
 	\
 	/* output rotation for sbox2 (<<< 1) */ \
 	/* output rotation for sbox3 (>>> 1) */ \
-	vpshufb inv_shift_row, x, t1; \
-	vpshufb .Lsp0044440444044404mask(%rip), x, t4; \
-	vpshufb .Lsp1110111010011110mask(%rip), x, x; \
+	vpshufb inv_shift_row_n_s2n3_shuffle, x, t1; \
+	vpshufb sp4mask, x, t4; \
+	vpshufb sp1mask, x, x; \
 	vpaddb t1, t1, t2; \
 	vpsrlw $7, t1, t0; \
 	vpsllw $7, t1, t3; \
 	vpor t0, t2, t0; \
 	vpsrlw $1, t1, t1; \
-	vpshufb .Lsp0222022222000222mask(%rip), t0, t0; \
+	vpshufb sp2mask, t0, t0; \
 	vpor t1, t3, t1; \
 	\
 	vpxor x, t4, t4; \
-	vpshufb .Lsp3033303303303033mask(%rip), t1, t1; \
+	vpshufb sp3mask, t1, t1; \
 	vpxor t4, t0, t0; \
 	vpxor t1, t0, t0; \
 	vpsrldq $8, t0, x; \
+	fn_out_xor(t0, x, out_xor_dst);
+
+#define camellia_f_xor_x(t0, x, _) \
 	vpxor t0, x, x;
+
+#ifdef USE_AVX512_GFNI
+
+ #define BV8(a0,a1,a2,a3,a4,a5,a6,a7) \
+	( (((a0) & 1) << 0) | \
+	  (((a1) & 1) << 1) | \
+	  (((a2) & 1) << 2) | \
+	  (((a3) & 1) << 3) | \
+	  (((a4) & 1) << 4) | \
+	  (((a5) & 1) << 5) | \
+	  (((a6) & 1) << 6) | \
+	  (((a7) & 1) << 7) )
+
+ #define BM8X8(l0,l1,l2,l3,l4,l5,l6,l7) \
+	( ((l7) << (0 * 8)) | \
+	  ((l6) << (1 * 8)) | \
+	  ((l5) << (2 * 8)) | \
+	  ((l4) << (3 * 8)) | \
+	  ((l3) << (4 * 8)) | \
+	  ((l2) << (5 * 8)) | \
+	  ((l1) << (6 * 8)) | \
+	  ((l0) << (7 * 8)) )
+
+ /* Pre-filters and post-filters constants for Camellia sbox s1.
+  *   See http://urn.fi/URN:NBN:fi:oulu-201305311409, pages 43-48.
+  */
+
+ /* Constant from "θ₁(x)" functions. */
+ #define pre_filter_constant_s1 BV8(1, 0, 1, 0, 0, 0, 1, 0)
+
+ /* Constant from "ψ₁(A(x))" function: */
+ #define post_filter_constant_s1  BV8(0, 1, 1, 1, 0, 1, 1, 0)
+
+ /* Camellia F function, AVX512+GFNI version */
+ #define camellia_f_gfni(ab, x, t0, t1, t2, \
+			 k_sbox4mask, gfni_vprolb1, gfni_vprorb1, \
+			 pre_filter_bitmatrix_s1, post_filter_bitmatrix_s1, \
+			 sp1mask, sp2mask, sp3mask, sp4mask, fn_out_xor, \
+			 out_xor_dst) \
+	\
+	/* input rotation for sbox4 (<<< 1) */ \
+	vgf2p8affineqb $0, gfni_vprolb1, ab, t0; \
+	vpblendmb t0, ab, x{k_sbox4mask}; \
+	\
+	/* AES subbytes */ \
+	vgf2p8affineqb $(pre_filter_constant_s1), \
+		       pre_filter_bitmatrix_s1, x, x; \
+	vgf2p8affineinvqb $(post_filter_constant_s1), \
+			  post_filter_bitmatrix_s1, x, x; \
+	\
+	/* output rotation for sbox2 (<<< 1) */ \
+	/* output rotation for sbox3 (>>> 1) */ \
+	vgf2p8affineqb $0, gfni_vprolb1, x, t0; \
+	vgf2p8affineqb $0, gfni_vprorb1, x, t1; \
+	vpshufb sp4mask, x, t2; \
+	vpshufb sp1mask, x, x; \
+	vpshufb sp2mask, t0, t0; \
+	vpshufb sp3mask, t1, t1; \
+	\
+	vpternlogd $0x96, x, t2, t0; \
+	vpxor t1, t0, t0; \
+	vpsrldq $8, t0, x; \
+	fn_out_xor(t0, x, out_xor_dst);
+
+ #define camellia_f_xor_cd(t0, x, cd) \
+	vpternlogd $0x96, t0, x, cd;
+
+ #define preload_camellia_f_consts() \
+	kmovb .Lk_one(%rip), %k1; \
+	kmovb .Lk_sbox4mask(%rip), %k2; \
+	vpbroadcastq .Lgfni_vprolb1(%rip), %xmm13; \
+	vpbroadcastq .Lgfni_vprorb1(%rip), %xmm12; \
+	vpbroadcastq .Lpre_filter_bitmatrix_s1(%rip), %xmm11; \
+	vpbroadcastq .Lpost_filter_bitmatrix_s1(%rip), %xmm10; \
+	vmovdqa .Lsp1mask_swap32_gfni(%rip), %xmm9; \
+	vmovdqa .Lsp2mask_swap32_gfni(%rip), %xmm8; \
+	vmovdqa .Lsp3mask_swap32_gfni(%rip), %xmm7; \
+	vmovdqa .Lsp4mask_swap32_gfni(%rip), %xmm6;
+
+ #define do_camellia_f(ab, cd, x, t0, t1, t2, t3, t4) \
+	camellia_f_gfni(ab, x, t0, t1, t2, %k2, \
+			%xmm13, %xmm12, %xmm11, %xmm10, \
+			%xmm9, %xmm8, %xmm7, %xmm6, \
+			camellia_f_xor_cd, cd);
+
+ #define add_roundkey_blk1(cd, t0, key) \
+	vpxorq key, cd, cd{%k1}{z};
+
+ #define do_fls_blk1(ll, lr, rl, rr, t0, t1, kll, klr, krl, krr) \
+	vpandd kll, ll, t0{%k1}{z}; \
+	vprold $1, t0, t0; \
+	vpxor t0, lr, lr; \
+	vpternlogd $0x1E, klr, lr, ll{%k1}{z}; \
+	\
+	vpternlogd $0x1E, krr, rr, rl{%k1}{z}; \
+	vpandd krl, rl, t1{%k1}{z}; \
+	vprold $1, t1, t1; \
+	vpxor t1, rr, rr;
+
+  #define clear_regs() \
+	kxorq %k1, %k1, %k1; \
+	kxorq %k2, %k2, %k2; \
+	vzeroall;
+
+#else
+
+ #define camellia_f_xor_cd(t0, x, cd) \
+	vpxor t0, cd, cd; \
+	vpxor x, cd, cd;
+
+ #define preload_camellia_f_consts() \
+	vmovdqa .Linv_shift_row_and_unpcklbw_sp2n3_swap32(%rip), %xmm8; \
+	vmovq .Lsbox4_input_mask_swap32(%rip), %xmm9; \
+	vbroadcastss .L0f0f0f0f(%rip), %xmm10; \
+	vmovdqa .Lpre_tf_lo_s1(%rip), %xmm11; \
+	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm12; \
+	vmovdqa .Lsp1mask_swap32(%rip), %xmm13; \
+	vmovdqa .Lsp2mask_swap32(%rip), %xmm14; \
+	vmovdqa .Lsp3mask_swap32(%rip), %xmm15;
+
+ #define do_camellia_f(ab, cd, x, t0, t1, t2, t3, t4) \
+	camellia_f_core(ab, x, t0, t1, t2, t3, t4, \
+			%xmm8, %xmm9, %xmm10, %xmm11, %xmm12, \
+			%xmm13, %xmm14, %xmm15, .Lsp4mask_swap32(%rip), \
+			camellia_f_xor_cd, cd);
+
+ #define add_roundkey_blk1(cd, t0, key) \
+	vmovq key, t0; \
+	vpxor t0, cd, cd;
+
+ #define do_vprold(s, x, t0) \
+	vpslld $(s), x, t0; \
+	vpsrld $(32-(s)), x, x; \
+	vpxor t0, x, x;
+
+ #define do_fls_blk1(ll, lr, rl, rr, t0, t1, kll, klr, krl, krr) \
+	vmovq kll, t0; \
+	vpand ll, t0, t0; \
+	do_vprold(1, t0, t1); \
+	vpxor t0, lr, lr; \
+	vmovq klr, t1; \
+	vpor lr, t1, t1; \
+	vpxor t1, ll, ll; \
+	\
+	vmovq krr, t0; \
+	vpor rr, t0, t0; \
+	vpxor t0, rl, rl; \
+	vmovq krl, t1; \
+	vpand rl, t1, t1; \
+	do_vprold(1, t1, t0); \
+	vpxor t1, rr, rr;
+
+  #define clear_regs() \
+	vzeroall;
+
+#endif
+
+#define roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, key) \
+	add_roundkey_blk1(cd, t0, key); \
+	do_camellia_f(ab, cd, t0, t1, t2, t3, t4, t5);
+
+#define two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, i, dir) \
+	roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, \
+		     (key_table + (i) * 8)(CTX)); \
+	roundsm_blk1(cd, ab, t0, t1, t2, t3, t4, t5, \
+		     (key_table + ((i) + (dir)) * 8)(CTX));
+
+#define enc_rounds_blk1(ab, cd, t0, t1, t2, t3, t4, t5, i) \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 2, 1); \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 4, 1); \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 6, 1);
+
+#define dec_rounds_blk1(ab, cd, t0, t1, t2, t3, t4, t5, i) \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 7, -1); \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 5, -1); \
+	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 3, -1);
+
+#define fls_blk1(ll_lr, rl_rr, tmp_lr, tmp_rr, t0, t1, kll, klr, krl, krr) \
+	vpsrlq $32, ll_lr, tmp_lr; \
+	vpsrlq $32, rl_rr, tmp_rr; \
+	do_fls_blk1(ll_lr, tmp_lr, rl_rr, tmp_rr, t0, t1, kll, klr, krl, krr); \
+	vpunpckldq tmp_lr, ll_lr, ll_lr; \
+	vpunpckldq tmp_rr, rl_rr, rl_rr;
+
+#define inpack_blk1(ab, cd, src, t0, t1, key) \
+	vmovdqa .Lpack_bswap(%rip), t0; \
+	vmovq key, t1; \
+	vmovq 0(src), ab; \
+	vmovq 8(src), cd; \
+	vpshufb t0, ab, ab; \
+	vpshufb t0, cd, cd; \
+	vpxor t1, ab, ab;
+
+#define outunpack_blk1(ab, cd, dst, t0, t1, key) \
+	vmovdqa .Lpack_bswap(%rip), t0; \
+	vmovq key, t1; \
+	vpxor t1, cd, cd; \
+	vpshufb t0, ab, ab; \
+	vpshufb t0, cd, cd; \
+	vmovq ab, 8(dst); \
+	vmovq cd, 0(dst);
+
+.align 16
+
+#ifdef USE_AVX512_GFNI
+
+/* Shuffling constants for AVX512+GFNI 1-way variant. */
+.Lsp1mask_swap32_gfni:
+	.byte 0xff, 0x04, 0x04, 0x04, 0xff, 0x04, 0x04, 0x04
+	.byte 0xff, 0x03, 0x03, 0x03, 0x03, 0xff, 0xff, 0x03
+.Lsp2mask_swap32_gfni:
+	.byte 0x07, 0x07, 0x07, 0xff, 0x07, 0x07, 0x07, 0xff
+	.byte 0x02, 0x02, 0x02, 0xff, 0xff, 0xff, 0x02, 0x02
+.Lsp3mask_swap32_gfni:
+	.byte 0x06, 0x06, 0xff, 0x06, 0x06, 0x06, 0xff, 0x06
+	.byte 0x01, 0x01, 0xff, 0x01, 0xff, 0x01, 0x01, 0xff
+.Lsp4mask_swap32_gfni:
+	.byte 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff
+	.byte 0x05, 0xff, 0x05, 0x05, 0x05, 0xff, 0x05, 0x05
+
+.Lk_sbox4mask:
+	.byte (1 << 0) | (1 << 5)
+.Lk_one:
+	.byte 1
+
+.align 8
+
+/* Bit-matrix for byte rotate left by 1: */
+.Lgfni_vprolb1:
+	.quad BM8X8(BV8(0, 0, 0, 0, 0, 0, 0, 1),
+		    BV8(1, 0, 0, 0, 0, 0, 0, 0),
+		    BV8(0, 1, 0, 0, 0, 0, 0, 0),
+		    BV8(0, 0, 1, 0, 0, 0, 0, 0),
+		    BV8(0, 0, 0, 1, 0, 0, 0, 0),
+		    BV8(0, 0, 0, 0, 1, 0, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 1, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 0, 1, 0))
+
+/* Bit-matrix for byte rotate right by 1: */
+.Lgfni_vprorb1:
+	.quad BM8X8(BV8(0, 1, 0, 0, 0, 0, 0, 0),
+		    BV8(0, 0, 1, 0, 0, 0, 0, 0),
+		    BV8(0, 0, 0, 1, 0, 0, 0, 0),
+		    BV8(0, 0, 0, 0, 1, 0, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 1, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 0, 1, 0),
+		    BV8(0, 0, 0, 0, 0, 0, 0, 1),
+		    BV8(1, 0, 0, 0, 0, 0, 0, 0))
+
+/* Pre-filters and post-filters bit-matrixes for Camellia sbox s1.
+ *   See http://urn.fi/URN:NBN:fi:oulu-201305311409, pages 43-48.
+ */
+
+/* Bit-matrix from "θ₁(x)" function: */
+.Lpre_filter_bitmatrix_s1:
+	.quad BM8X8(BV8(1, 1, 1, 0, 1, 1, 0, 1),
+		    BV8(0, 0, 1, 1, 0, 0, 1, 0),
+		    BV8(1, 1, 0, 1, 0, 0, 0, 0),
+		    BV8(1, 0, 1, 1, 0, 0, 1, 1),
+		    BV8(0, 0, 0, 0, 1, 1, 0, 0),
+		    BV8(1, 0, 1, 0, 0, 1, 0, 0),
+		    BV8(0, 0, 1, 0, 1, 1, 0, 0),
+		    BV8(1, 0, 0, 0, 0, 1, 1, 0))
+
+/* Bit-matrix from "ψ₁(A(x))" function: */
+.Lpost_filter_bitmatrix_s1:
+	.quad BM8X8(BV8(0, 0, 0, 0, 0, 0, 0, 1),
+		    BV8(0, 1, 1, 0, 0, 1, 1, 0),
+		    BV8(1, 0, 1, 1, 1, 1, 1, 0),
+		    BV8(0, 0, 0, 1, 1, 0, 1, 1),
+		    BV8(1, 0, 0, 0, 1, 1, 1, 0),
+		    BV8(0, 1, 0, 1, 1, 1, 1, 0),
+		    BV8(0, 1, 1, 1, 1, 1, 1, 1),
+		    BV8(0, 0, 0, 1, 1, 1, 0, 0))
+
+#else
+
+/* Shuffling constants for AVX+AESNI 1-way variant. */
+.Linv_shift_row_and_unpcklbw_sp2n3_swap32:
+	.byte 0x04, 0xff, 0x01, 0xff, 0x0e, 0xff, 0x0b, 0xff
+	.byte 0x00, 0xff, 0x0d, 0xff, 0x0a, 0xff, 0x07, 0xff
+.Lsp1mask_swap32:
+	.byte 0xff, 0x04, 0x04, 0x04, 0xff, 0x04, 0x04, 0x04
+	.byte 0xff, 0x07, 0x07, 0x07, 0x07, 0xff, 0xff, 0x07
+.Lsp2mask_swap32:
+	.byte 0x06, 0x06, 0x06, 0xff, 0x06, 0x06, 0x06, 0xff
+	.byte 0x0c, 0x0c, 0x0c, 0xff, 0xff, 0xff, 0x0c, 0x0c
+.Lsp3mask_swap32:
+	.byte 0x04, 0x04, 0xff, 0x04, 0x04, 0x04, 0xff, 0x04
+	.byte 0x0a, 0x0a, 0xff, 0x0a, 0xff, 0x0a, 0x0a, 0xff
+.Lsp4mask_swap32:
+	.byte 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff
+	.byte 0x01, 0xff, 0x01, 0x01, 0x01, 0xff, 0x01, 0x01
+.Lsbox4_input_mask_swap32:
+	.byte 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00
+
+#endif
+
+.align 16
+.global have_camellia_1blk_simd128
+
+have_camellia_1blk_simd128:
+	movl $1, %eax;
+	ret;
+
+.align 16
+.global camellia_encrypt_1blk_simd128
+
+camellia_encrypt_1blk_simd128:
+	/* input:
+	 *	%rdi: ctx, CTX
+	 *	%rsi: dst (16 bytes)
+	 *	%rdx: src (16 bytes)
+	 */
+
+	cmpl $16, key_length(CTX);
+	movl $32, %r8d;
+	movl $24, %eax;
+	cmovel %eax, %r8d; /* max */
+
+	leaq (-8 * 8)(CTX, %r8, 8), %r8;
+
+	inpack_blk1(%xmm0, %xmm1, %rdx, %xmm2, %xmm3, (key_table)(CTX));
+
+	preload_camellia_f_consts();
+
+.align 8
+.Lenc_loop_blk1:
+	enc_rounds_blk1(%xmm0, %xmm1,
+		        %xmm2, %xmm3, %xmm4, %xmm5, %xmm6, %xmm7, 0);
+
+	cmpq %r8, CTX;
+	je .Lenc_done_blk1;
+	leaq (8 * 8)(CTX), CTX;
+
+	fls_blk1(%xmm0, %xmm1, %xmm2, %xmm3, %xmm4, %xmm5,
+		 ((key_table) + 0)(CTX),
+	         ((key_table) + 4)(CTX),
+	         ((key_table) + 8)(CTX),
+	         ((key_table) + 12)(CTX));
+
+	jmp .Lenc_loop_blk1;
+
+.align 8
+.Lenc_done_blk1:
+	outunpack_blk1(%xmm0, %xmm1, %rsi, %xmm2, %xmm3,
+		       ((key_table) + 8 * 8)(CTX));
+
+	clear_regs();
+	ret;
+
+.align 16
+.global camellia_decrypt_1blk_simd128
+
+camellia_decrypt_1blk_simd128:
+	/* input:
+	 *	%rdi: ctx, CTX
+	 *	%rsi: dst (16 bytes)
+	 *	%rdx: src (16 bytes)
+	 */
+
+	cmpl $16, key_length(CTX);
+	movl $32, %r8d;
+	movl $24, %eax;
+	cmovel %eax, %r8d; /* max */
+
+	leaq (key_table)(CTX, %r8, 8), %rax;
+
+	movq %r8, %rcx;
+	movq CTX, %r8
+	leaq (-8 * 8)(CTX, %rcx, 8), CTX;
+
+	inpack_blk1(%xmm0, %xmm1, %rdx, %xmm2, %xmm3, (%rax));
+
+	preload_camellia_f_consts();
+
+.align 8
+.Ldec_loop_blk1:
+	dec_rounds_blk1(%xmm0, %xmm1,
+			%xmm2, %xmm3, %xmm4, %xmm5, %xmm6, %xmm7, 0);
+
+	cmpq %r8, CTX;
+	je .Ldec_done_blk1;
+
+	fls_blk1(%xmm0, %xmm1, %xmm2, %xmm3, %xmm4, %xmm5,
+		 ((key_table) + 8)(CTX),
+	         ((key_table) + 12)(CTX),
+	         ((key_table) + 0)(CTX),
+	         ((key_table) + 4)(CTX));
+
+	leaq (-8 * 8)(CTX), CTX;
+	jmp .Ldec_loop_blk1;
+
+.align 8
+.Ldec_done_blk1:
+	outunpack_blk1(%xmm0, %xmm1, %rsi, %xmm2, %xmm3, (key_table)(CTX));
+
+	clear_regs();
+	ret;
+
+/**********************************************************************
+  camellia key setup
+ **********************************************************************/
+
+/*
+ * IN:
+ *  ab: 64-bit AB state
+ *  cd: 64-bit CD state
+ */
+#define camellia_f(ab, x, t0, t1, t2, t3, t4, inv_shift_row, sbox4mask, \
+		   _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, key) \
+	vmovq key, t0; \
+	vpxor ab, t0, x; \
+	camellia_f_core(x, x, t0, t1, t2, t3, t4, inv_shift_row, sbox4mask, \
+			_0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, \
+			.Lsp1110111010011110mask(%rip), \
+			.Lsp0222022222000222mask(%rip), \
+			.Lsp3033303303303033mask(%rip), \
+			.Lsp0044440444044404mask(%rip), \
+			camellia_f_xor_x, _);
 
 #define vec_rol128(in, out, nrol, t0) \
 	vpshufd $0x4e, in, out; \

@@ -22,8 +22,8 @@ CFB decryption, XTS, OCB, etc.
 
 # Implementations
 
-## SIMD128
-The SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
+## SIMD128 - 16 block parallel
+These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
 
 - [camellia_simd128_with_aes_instruction_set.c](camellia_simd128_with_aes_instruction_set.c):
   - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE) and for PowerPC with AES crypto instruction set.
@@ -45,6 +45,17 @@ The SIMD128 (128-bit vector) implementation variants process 16 blocks in parall
   - GCC assembly implementation for armv8 with Neon and AES CE.
   - Includes vector assembly implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On ThunderX2, this implementation is **~2.7 times faster** than reference.
+
+## SIMD128 - 1 block non-parallel
+These SIMD128 (128-bit vector) implementation variants process one block at time. These provide constant-time alternative for
+reference implementation which uses table look-ups.
+
+- [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
+  - GCC assembly implementation variants for x86-64:
+    - **x86-64+AVX+AES-NI** variant:
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.4 times slower** than reference.
+    - **x86-64+AVX512+GFNI** variant:
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.6 times slower** than reference.
 
 ## SIMD256
 The SIMD256 (256-bit vector) implementation variants process 32 blocks in parallel.
@@ -103,8 +114,9 @@ x86_64-linux-gnu-gcc -O2 -Wall -c camellia_simd256_x86-64_aesni_avx2.S -o camell
 x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_aesni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64
 x86_64-linux-gnu-gcc -O2 -Wall -DUSE_VAES -c camellia_simd256_x86-64_aesni_avx2.S -o camellia_simd256_x86-64_vaes_avx2.o
 x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_vaes_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_vaes
+x86_64-linux-gnu-gcc -O2 -Wall -DUSE_GFNI -DUSE_AVX512 -c camellia_simd128_x86-64_aesni_avx.S -o camellia_simd128_x86-64_aesni_avx+avx512+gfni.o
 x86_64-linux-gnu-gcc -O2 -Wall -DUSE_GFNI -c camellia_simd256_x86-64_aesni_avx2.S -o camellia_simd256_x86-64_gfni_avx2.o
-x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_gfni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_gfni
+x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx+avx512+gfni.o camellia_simd256_x86-64_gfni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_gfni
 i686-linux-gnu-gcc -O2 -Wall -march=sandybridge -mtune=native -msse4.1 -maes -c camellia_simd128_with_aes_instruction_set.c -o camellia_simd128_with_x86_aesni_i386.o
 i686-linux-gnu-gcc -O2 -Wall -c main.c -o main_simd128_i386.o
 i686-linux-gnu-gcc -O2 -Wall -c camellia-BSD-1.2.0/camellia.c -o camellia_ref_i386.o
@@ -153,6 +165,9 @@ $ ./test_simd256_asm_x86_64
 selftest: comparing camellia-128 test vectors against reference implementation...
 selftest: comparing camellia-192 test vectors against reference implementation...
 selftest: comparing camellia-256 test vectors against reference implementation...
+selftest: checking 1-block parallel camellia-128/SIMD128 against test vectors...
+selftest: checking 1-block parallel camellia-192/SIMD128 against test vectors...
+selftest: checking 1-block parallel camellia-256/SIMD128 against test vectors...
 selftest: checking 16-block parallel camellia-128/SIMD128 against test vectors...
 selftest: checking 16-block parallel camellia-192/SIMD128 against test vectors...
 selftest: checking 16-block parallel camellia-256/SIMD128 against test vectors...
@@ -163,12 +178,14 @@ selftest: checking 16-block parallel camellia-128/SIMD128 against large test vec
 selftest: checking 16-block parallel camellia-256/SIMD128 against large test vectors...
 selftest: checking 32-block parallel camellia-128/SIMD256 against large test vectors...
 selftest: checking 32-block parallel camellia-256/SIMD256 against large test vectors...
-           camellia-128 reference encryption:    311.901 Mebibytes/s,    327.052 Megabytes/s
-           camellia-128 reference decryption:    312.631 Mebibytes/s,    327.817 Megabytes/s
- camellia-128 SIMD128 (16 blocks) encryption:   1419.266 Mebibytes/s,   1488.208 Megabytes/s
- camellia-128 SIMD128 (16 blocks) decryption:   1408.989 Mebibytes/s,   1477.432 Megabytes/s
- camellia-128 SIMD256 (32 blocks) encryption:   2373.591 Mebibytes/s,   2488.891 Megabytes/s
- camellia-128 SIMD256 (32 blocks) decryption:   2366.509 Mebibytes/s,   2481.464 Megabytes/s
+           camellia-128 reference encryption:    372.041 Mebibytes/s,    390.113 Megabytes/s
+           camellia-128 reference decryption:    371.912 Mebibytes/s,    389.979 Megabytes/s
+   camellia-128 SIMD128 (1 block) encryption:    238.747 Mebibytes/s,    250.345 Megabytes/s
+   camellia-128 SIMD128 (1 block) decryption:    238.891 Mebibytes/s,    250.495 Megabytes/s
+ camellia-128 SIMD128 (16 blocks) encryption:   1347.869 Mebibytes/s,   1413.343 Megabytes/s
+ camellia-128 SIMD128 (16 blocks) decryption:   1345.991 Mebibytes/s,   1411.374 Megabytes/s
+ camellia-128 SIMD256 (32 blocks) encryption:   5159.460 Mebibytes/s,   5410.086 Megabytes/s
+ camellia-128 SIMD256 (32 blocks) decryption:   5155.399 Mebibytes/s,   5405.827 Megabytes/s
 $ ./test_simd256_intrinsics_x86_64_gfni_avx512
 ./test_simd256_intrinsics_x86_64_gfni_avx512:
 selftest: comparing camellia-128 test vectors against reference implementation...

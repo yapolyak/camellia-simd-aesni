@@ -2136,3 +2136,31 @@ camellia_keysetup_simd128:
     b       __camellia_setup128_neon
 
 .size   camellia_keysetup_simd128, .-camellia_keysetup_simd128
+
+/*
+ * 1-way implementation not yet ported to ARM-CE
+ */
+.text
+.globl  have_camellia_1blk_simd128
+.type   have_camellia_1blk_simd128,%function
+.align  5
+have_camellia_1blk_simd128:
+    mov     x0,#0
+    ret
+.size   have_camellia_1blk_simd128, .-have_camellia_1blk_simd128
+
+.text
+.globl  camellia_encrypt_1blk_simd128
+.type   camellia_encrypt_1blk_simd128,%function
+.align  5
+camellia_encrypt_1blk_simd128:
+    ret
+.size   camellia_encrypt_1blk_simd128, .-camellia_encrypt_1blk_simd128
+
+.text
+.globl  camellia_decrypt_1blk_simd128
+.type   camellia_decrypt_1blk_simd128,%function
+.align  5
+camellia_decrypt_1blk_simd128:
+    ret
+.size   camellia_decrypt_1blk_simd128, .-camellia_decrypt_1blk_simd128

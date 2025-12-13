@@ -2162,3 +2162,25 @@ int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *vkey,
   ctx->key_length = keylen;
   return 0;
 }
+
+/* 1-way implementation not yet ported to SIMD128 instrinsics */
+int have_camellia_1blk_simd128(void)
+{
+  return 0;
+}
+
+void camellia_encrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
+				   const void *in)
+{
+  (void)ctx;
+  (void)out;
+  (void)in;
+}
+
+void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
+				   const void *in)
+{
+  (void)ctx;
+  (void)out;
+  (void)in;
+}

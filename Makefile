@@ -101,7 +101,7 @@ test_simd256_asm_x86_64_vaes: camellia_simd128_x86-64_aesni_avx.o \
 			      camellia_ref_x86-64.o
 	$(CC_X86_64) $^ -o $@ $(LDFLAGS)
 
-test_simd256_asm_x86_64_gfni: camellia_simd128_x86-64_aesni_avx.o \
+test_simd256_asm_x86_64_gfni: camellia_simd128_x86-64_aesni_avx+avx512+gfni.o \
 			      camellia_simd256_x86-64_gfni_avx2.o \
 			      main_simd256.o \
 			      camellia_ref_x86-64.o
@@ -157,6 +157,9 @@ camellia_simd256_x86_gfni_avx512.o: camellia_simd256_x86_aesni.c
 
 camellia_simd128_x86-64_aesni_avx.o: camellia_simd128_x86-64_aesni_avx.S
 	$(CC_X86_64) $(CFLAGS) -c $< -o $@
+
+camellia_simd128_x86-64_aesni_avx+avx512+gfni.o: camellia_simd128_x86-64_aesni_avx.S
+	$(CC_X86_64) $(CFLAGS) -DUSE_GFNI -DUSE_AVX512 -c $< -o $@
 
 camellia_simd256_x86-64_aesni_avx2.o: camellia_simd256_x86-64_aesni_avx2.S
 	$(CC_X86_64) $(CFLAGS) -c $< -o $@
