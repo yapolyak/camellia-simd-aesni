@@ -22,6 +22,17 @@ CFB decryption, XTS, OCB, etc.
 
 # Implementations
 
+## SIMD128 - 1 block non-parallel
+These SIMD128 (128-bit vector) implementation variants process one block at time. These provide constant-time alternative for
+reference implementation which uses table look-ups.
+
+- [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
+  - GCC assembly implementation variants for x86-64:
+    - **x86-64+AVX+AES-NI** variant:
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.4 times slower** than reference.
+    - **x86-64+AVX512+GFNI** variant:
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.6 times slower** than reference.
+
 ## SIMD128 - 16 block parallel
 These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
 
@@ -46,18 +57,7 @@ These SIMD128 (128-bit vector) implementation variants process 16 blocks in para
   - Includes vector assembly implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On ThunderX2, this implementation is **~2.7 times faster** than reference.
 
-## SIMD128 - 1 block non-parallel
-These SIMD128 (128-bit vector) implementation variants process one block at time. These provide constant-time alternative for
-reference implementation which uses table look-ups.
-
-- [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
-  - GCC assembly implementation variants for x86-64:
-    - **x86-64+AVX+AES-NI** variant:
-      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.4 times slower** than reference.
-    - **x86-64+AVX512+GFNI** variant:
-      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.6 times slower** than reference.
-
-## SIMD256
+## SIMD256 - 32 block parallel
 The SIMD256 (256-bit vector) implementation variants process 32 blocks in parallel.
 - [camellia_simd256_x86_aesni.c](camellia_simd256_x86_aesni.c):
   - Intel C intrinsics implentation for x86 with AES-NI or VAES or GFNI. Requires either AVX2 instruction set and gets best
