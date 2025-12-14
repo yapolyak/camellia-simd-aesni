@@ -1089,12 +1089,13 @@ camellia_decrypt_16blks_simd128:
 	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm12; \
 	vmovdqa .Lsp1mask_swap32(%rip), %xmm13; \
 	vmovdqa .Lsp2mask_swap32(%rip), %xmm14; \
-	vmovdqa .Lsp3mask_swap32(%rip), %xmm15;
+	vmovdqa .Lsp3mask_swap32(%rip), %xmm15; \
+	vmovdqa .Lsp4mask_swap32(%rip), %xmm8;
 
  #define do_camellia_f(ab, cd, x, t0, t1, t2, t3, t4) \
 	camellia_f_core(ab, x, t0, t1, t2, t3, t4, \
 			%xmm9, %xmm10, %xmm11, %xmm12, \
-			%xmm13, %xmm14, %xmm15, .Lsp4mask_swap32(%rip), \
+			%xmm13, %xmm14, %xmm15, %xmm8, \
 			camellia_f_xor_cd, cd);
 
  #define add_roundkey_blk1(cd, t0, key) \
