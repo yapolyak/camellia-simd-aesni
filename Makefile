@@ -6,7 +6,7 @@ CFLAGS = -O2 -Wall
 CFLAGS_SIMD128_X86 = $(CFLAGS) -march=sandybridge -mtune=native -msse4.1 -maes
 CFLAGS_SIMD256_X86 = $(CFLAGS) -march=haswell -mtune=native -mavx2 -maes
 CFLAGS_SIMD256_X86_VAES = $(CFLAGS) -march=haswell -mtune=native -mavx2 -maes -mvaes
-CFLAGS_SIMD256_X86_VAES_AVX512 = $(CFLAGS) -march=znver3 -mavx512f -mavx512vl -mavx512bw \
+CFLAGS_SIMD256_X86_VAES_AVX512 = $(CFLAGS) -march=znver4 -mavx512f -mavx512vl -mavx512bw \
 					-mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq \
 					-mavx512vbmi2 -mavx512bitalg -mavx512vnni \
 					-mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni
@@ -22,7 +22,8 @@ ifneq ($(shell which $(CC_X86_64)),)
 		test_simd256_intrinsics_x86_64_vaes_avx512 \
 		test_simd256_intrinsics_x86_64_gfni_avx512 \
 		test_simd128_asm_x86_64 test_simd256_asm_x86_64 \
-		test_simd256_asm_x86_64_vaes test_simd256_asm_x86_64_gfni
+		test_simd256_asm_x86_64_vaes test_simd256_asm_x86_64_gfni \
+		test_simd256_asm_x86_64_gfni_avx512
 endif
 ifneq ($(shell which $(CC_I386)),)
 	PROGRAMS += test_simd128_intrinsics_i386 test_simd256_intrinsics_i386
@@ -46,6 +47,7 @@ clean:
 	rm test_simd256_asm_x86_64 2>/dev/null || true
 	rm test_simd256_asm_x86_64_vaes 2>/dev/null || true
 	rm test_simd256_asm_x86_64_gfni 2>/dev/null || true
+	rm test_simd256_asm_x86_64_gfni_avx512 2>/dev/null || true
 	rm test_simd256_intrinsics_x86_64_vaes 2>/dev/null || true
 	rm test_simd256_intrinsics_x86_64_vaes_avx512 2>/dev/null || true
 	rm test_simd256_intrinsics_x86_64_gfni_avx512 2>/dev/null || true
@@ -101,7 +103,13 @@ test_simd256_asm_x86_64_vaes: camellia_simd128_x86-64_aesni_avx.o \
 			      camellia_ref_x86-64.o
 	$(CC_X86_64) $^ -o $@ $(LDFLAGS)
 
-test_simd256_asm_x86_64_gfni: camellia_simd128_x86-64_aesni_avx+avx512+gfni.o \
+test_simd256_asm_x86_64_gfni_avx512: camellia_simd128_x86-64_aesni_avx+avx512+gfni.o \
+				     camellia_simd256_x86-64_gfni_avx2.o \
+				     main_simd256.o \
+				     camellia_ref_x86-64.o
+	$(CC_X86_64) $^ -o $@ $(LDFLAGS)
+
+test_simd256_asm_x86_64_gfni: camellia_simd128_x86-64_aesni_avx.o \
 			      camellia_simd256_x86-64_gfni_avx2.o \
 			      main_simd256.o \
 			      camellia_ref_x86-64.o
