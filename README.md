@@ -33,6 +33,17 @@ reference implementation which uses table look-ups.
     - **x86-64+AVX+AES-NI** variant:
       - On Intel Core i3-1115G4 (tigerlake), this implementation is **~1.6 times slower** than reference.
       - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~2.8 times slower** than reference.
+  - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
+
+- [camellia_simd128_with_aes_instruction_set.c](camellia_simd128_with_aes_instruction_set.c):
+  - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE) and for PowerPC with AES crypto instruction set.
+    - x86 implementation requires AES-NI and either SSE4.1 or AVX instruction set and gets best performance with x86-64 + AVX.
+    - ARM implementation requires AArch64, NEON and ARMv8 AES CE instruction set.
+    - PowerPC implementation requires VSX and AES crypto instruction set.
+  - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
+  - On ARM/Cortex-A53, this implementation is **~1.4 times slower** than reference (compiled with gcc-15).
+  - On Intel Core i3-1115G4 (tigerlake), this implementation is **~1.6 times slower** than reference (compiled with gcc-15).
+  - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~2.9 times slower** than reference (compiled with gcc-15).
 
 ## SIMD128 - 16 block parallel
 These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
@@ -66,6 +77,7 @@ These SIMD128 (128-bit vector) implementation variants process 16 blocks in para
 
 ## SIMD256 - 32 block parallel
 The SIMD256 (256-bit vector) implementation variants process 32 blocks in parallel.
+
 - [camellia_simd256_x86_aesni.c](camellia_simd256_x86_aesni.c):
   - Intel C intrinsics implentation for x86 with AES-NI or VAES or GFNI. Requires either AVX2 instruction set and gets best
   performance with x86-64 + AVX512 + GFNI.
