@@ -2,8 +2,7 @@
 In this repository, you find x86 (AES-NI, VAES, GFNI), ARMv8 (Neon/AES Crypto Extension) and PowerPC crypto instruction set accelerated vector implementations of
 [Camellia cipher](https://info.isl.ntt.co.jp/crypt/eng/camellia/).
 For x86-64 and aarch64, both Intel C intrinsics and assembly implementations are provided, with the instrinsics implementation being
-easier to port to other instruction sets. For PowerPC,
-a 128-bit vector instrinsics implementation is provided.
+easier to port to other instruction sets. For PowerPC, a 128-bit vector instrinsics implementation is provided.
 
 # How it works
 It happens to be that Camellia uses s-box construction is very similar to AES SubBytes.
@@ -28,10 +27,12 @@ reference implementation which uses table look-ups.
 
 - [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
   - GCC assembly implementation variants for x86-64:
-    - **x86-64+AVX+AES-NI** variant:
-      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~2.8 times slower** than reference.
     - **x86-64+AVX512+GFNI** variant:
+      - On Intel Core i3-1115G4 (tigerlake), this implementation is **~1.2 times faster** than reference.
       - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.2 times slower** than reference.
+    - **x86-64+AVX+AES-NI** variant:
+      - On Intel Core i3-1115G4 (tigerlake), this implementation is **~1.6 times slower** than reference.
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~2.8 times slower** than reference.
 
 ## SIMD128 - 16 block parallel
 These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
@@ -43,19 +44,25 @@ These SIMD128 (128-bit vector) implementation variants process 16 blocks in para
     - PowerPC implementation requires VSX and AES crypto instruction set.
   - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On Intel Core i5-6500 (skylake), this implementation is **~3.5 times faster** than reference.
-  - On ThunderX2, this implementation is **~3.0 times faster** than reference (compiled with gcc-13).
+  - On Intel Core i3-1115G4 (tigerlake), this implementation is **~4.0 times faster** than reference (compiled with gcc-14).
+  - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.1 times faster** than reference (compiled with gcc-15).
+  - On ARM/ThunderX2, this implementation is **~3.0 times faster** than reference (compiled with gcc-13).
+  - On ARM/Cortex-A53, this implementation is **~2.2 times faster** than reference (compiled with gcc-15).
   - On POWER9/ppc64le, this implementation is **~2.4 times faster** than reference.
 
 - [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
   - GCC assembly implementation for x86-64 with AES-NI and AVX.
   - Includes vector assembly implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On Intel Core i5-6500 (skylake), this implementation is **~3.6 times faster** than reference.
+  - On Intel Core i3-1115G4 (tigerlake), this implementation is **~4.3 times faster** than reference.
   - On AMD Ryzen 9 7900X (zen4), this implementation is **~4.5 times faster** than reference.
+  - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.6 times faster** than reference.
 
 - [camellia_simd128_armv8_neon_aese.S](camellia_simd128_armv8_neon_aese.S):
   - GCC assembly implementation for armv8 with Neon and AES CE.
   - Includes vector assembly implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
-  - On ThunderX2, this implementation is **~2.7 times faster** than reference.
+  - On ARM/ThunderX2, this implementation is **~2.7 times faster** than reference.
+  - On ARM/Cortex-A53, this implementation is **~2.3 times faster** than reference.
 
 ## SIMD256 - 32 block parallel
 The SIMD256 (256-bit vector) implementation variants process 32 blocks in parallel.
@@ -68,6 +75,14 @@ The SIMD256 (256-bit vector) implementation variants process 32 blocks in parall
     reference.
   - On AMD Ryzen 9 7900X (zen4), when compiled for **x86-64+AVX512+GFNI**, this implementation is **~18.7 times faster** than
     reference.
+  - On Intel Core i3-1115G4 (tigerlake), when compiled for **x86-64+AVX512+VAES**, this implementation is **~8.6 times faster**
+    than reference (compiled with gcc-14).
+  - On Intel Core i3-1115G4 (tigerlake), when compiled for **x86-64+AVX512+GFNI**, this implementation is **~17.8 times faster**
+    than reference (compiled with gcc-14).
+  - On AMD Ryzen 9 9950X3D (zen5), when compiled for **x86-64+AVX512+VAES**, this implementation is **~7.4 times faster**
+    than reference (compiled with gcc-15).
+  - On AMD Ryzen 9 9950X3D (zen5), when compiled for **x86-64+AVX512+GFNI**, this implementation is **~14.1 times faster**
+    than reference (compiled with gcc-15).
 
 - [camellia_simd256_x86-64_aesni_avx2.S](camellia_simd256_x86-64_aesni_avx2.S):
   - GCC assembly implementation for x86-64 with AES-NI/VAES/GFNI AVX2.
@@ -77,11 +92,14 @@ The SIMD256 (256-bit vector) implementation variants process 32 blocks in parall
     than reference.
   - On AMD Ryzen 9 7900X (zen4), when compiled for **x86-64+AVX2+GFNI**, this implementation is **~18.2 times faster**
     than reference (**~0.92 cycles/byte**).
+  - On AMD Ryzen 9 9950X3D (zen5), when compiled for **x86-64+AVX2+VAES**, this implementation is **~7.3 times faster**
+    than reference.
+  - On AMD Ryzen 9 9950X3D (zen5), when compiled for **x86-64+AVX2+GFNI**, this implementation is **~14.1 times faster**
+    than reference.
 
 # Compiling and testing
 
 ## Prerequisites
-- OpenSSL: used for reference implementation.
 - GNU make
 - GCC x86-64
 - Optionally GCC i686
