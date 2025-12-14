@@ -29,9 +29,9 @@ reference implementation which uses table look-ups.
 - [camellia_simd128_x86-64_aesni_avx.S](camellia_simd128_x86-64_aesni_avx.S):
   - GCC assembly implementation variants for x86-64:
     - **x86-64+AVX+AES-NI** variant:
-      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~3.4 times slower** than reference.
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~2.8 times slower** than reference.
     - **x86-64+AVX512+GFNI** variant:
-      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.6 times slower** than reference.
+      - On AMD Ryzen 9 9950X3D (zen5), this implementation is **~1.2 times slower** than reference.
 
 ## SIMD128 - 16 block parallel
 These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.

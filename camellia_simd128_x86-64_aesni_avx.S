@@ -28,14 +28,17 @@
 /**********************************************************************
   helper macros
  **********************************************************************/
-#define filter_8bit(x, lo_t, hi_t, mask4bit, tmp0) \
-	vpand x, mask4bit, tmp0; \
-	vpandn x, mask4bit, x; \
-	vpsrld $4, x, x; \
+#define filter_8bit_3op(out, in, lo_t, hi_t, mask4bit, tmp0) \
+	vpand in, mask4bit, tmp0; \
+	vpandn in, mask4bit, out; \
+	vpsrld $4, out, out; \
 	\
 	vpshufb tmp0, lo_t, tmp0; \
-	vpshufb x, hi_t, x; \
-	vpxor tmp0, x, x;
+	vpshufb out, hi_t, out; \
+	vpxor tmp0, out, out;
+
+#define filter_8bit(x, lo_t, hi_t, mask4bit, tmp0) \
+	filter_8bit_3op(x, x, lo_t, hi_t, mask4bit, tmp0);
 
 /**********************************************************************
   16-way camellia
@@ -891,42 +894,56 @@ camellia_decrypt_16blks_simd128:
 
 /* Camellia F function, AVX+AESNI version */
 #define camellia_f_core(ab, x, t0, t1, t2, t3, t4, \
-			 inv_shift_row_n_s2n3_shuffle, sbox4mask, \
+			 inv_shift_row_n_s2n3_shuffle, \
 			 _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, \
 			 sp1mask, sp2mask, sp3mask, sp4mask, fn_out_xor, \
 			 out_xor_dst) \
-	vpxor t3, t3, t3; \
 	\
 	/* \
 	 * S-function with AES subbytes \
 	 */ \
 	\
-	/* input rotation for sbox4 (<<< 1) */ \
-	vpand ab, sbox4mask, t0; \
-	vpandn ab, sbox4mask, x; \
-	vpaddb t0, t0, t1; \
-	vpsrlw $7, t0, t0; \
-	vpor t0, t1, t0; \
-	vpand sbox4mask, t0, t0; \
-	vpor t0, x, x; \
+	vmovdqa .Lpre_tf_lo_s4(%rip), t0; \
+	vmovdqa .Lpre_tf_hi_s4(%rip), t1; \
+	vpxor t3, t3, t3; \
+	\
+	/* prefilter sboxes s1,s2,s3 */ \
+	filter_8bit_3op(t4, ab, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
+	\
+	/* prefilter sbox s4 */ \
+	filter_8bit_3op(x, ab, t0, t1, _0f0f0f0fmask, t2); \
 	\
 	vmovdqa .Lpost_tf_lo_s1(%rip), t0; \
 	vmovdqa .Lpost_tf_hi_s1(%rip), t1; \
 	\
-	/* prefilter sboxes */ \
-	filter_8bit(x, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
-	\
 	/* AES subbytes + AES shift rows */ \
+	vaesenclast t3, t4, t4; \
 	vaesenclast t3, x, x; \
 	\
-	/* postfilter sboxes */ \
+	/* postfilter sboxes s1,s2,s3 */ \
+	filter_8bit(t4, t0, t1, _0f0f0f0fmask, t2); \
+	\
+	/* postfilter sboxes s4 */ \
 	filter_8bit(x, t0, t1, _0f0f0f0fmask, t2); \
+	\
+	/* Unpack 8-bit fields in lower 64-bits of XMM to */ \
+	/* 16-bit fields in full 128-bit XMM. This is to allow faster */ \
+	/* byte rotation for s2&s3 as SSE/AVX lacks native byte */ \
+	/* shift/rotation instructions. */ \
+	/* Note: Revisit when porting to architecture with native byte */ \
+	/* shift/rotation instructions. If target has variable */ \
+	/* shift/rotation instruction (shift count in vector register), */ \
+	/* structure of this macro should follow the GFNI variant seen */ \
+	/* below. That is: calculate sboxes and rotations in lower 64-bit */ \
+	/* of XMM register followed by s1-s4 permutations from 64-bit to */ \
+	/* 128-bit and XOR back to 64-bit. */ \
+	vpshufb inv_shift_row_n_s2n3_shuffle, t4, t1; \
+	\
+	vpshufb sp1mask, t4, t4; \
+	vpshufb sp4mask, x, x; \
 	\
 	/* output rotation for sbox2 (<<< 1) */ \
 	/* output rotation for sbox3 (>>> 1) */ \
-	vpshufb inv_shift_row_n_s2n3_shuffle, x, t1; \
-	vpshufb sp4mask, x, t4; \
-	vpshufb sp1mask, x, x; \
 	vpaddb t1, t1, t2; \
 	vpsrlw $7, t1, t0; \
 	vpsllw $7, t1, t3; \
@@ -967,65 +984,77 @@ camellia_decrypt_16blks_simd128:
 	  ((l1) << (6 * 8)) | \
 	  ((l0) << (7 * 8)) )
 
- /* Pre-filters and post-filters constants for Camellia sbox s1.
-  *   See http://urn.fi/URN:NBN:fi:oulu-201305311409, pages 43-48.
-  */
+/* Pre-filters and post-filters constants for Camellia sboxes s1, s2, s3 and s4.
+ *   See http://urn.fi/URN:NBN:fi:oulu-201305311409, pages 43-48.
+ *
+ * Pre-filters are directly from above source, "θ₁"/"θ₄". Post-filters are
+ * combination of function "A" (AES SubBytes affine transformation) and
+ * "ψ₁"/"ψ₂"/"ψ₃".
+ */
 
- /* Constant from "θ₁(x)" functions. */
- #define pre_filter_constant_s1 BV8(1, 0, 1, 0, 0, 0, 1, 0)
+/* Constant from "θ₁(x)" and "θ₄(x)" functions. */
+#define pre_filter_constant_s1234 BV8(1, 0, 1, 0, 0, 0, 1, 0)
 
- /* Constant from "ψ₁(A(x))" function: */
- #define post_filter_constant_s1  BV8(0, 1, 1, 1, 0, 1, 1, 0)
+/* Constant from "ψ₁(A(x))" function: */
+#define post_filter_constant_s14  BV8(0, 1, 1, 1, 0, 1, 1, 0)
+
+/* Constant from "ψ₂(A(x))" function: */
+#define post_filter_constant_s2   BV8(0, 0, 1, 1, 1, 0, 1, 1)
+
+/* Constant from "ψ₃(A(x))" function: */
+#define post_filter_constant_s3   BV8(1, 1, 1, 0, 1, 1, 0, 0)
 
  /* Camellia F function, AVX512+GFNI version */
- #define camellia_f_gfni(ab, x, t0, t1, t2, \
-			 k_sbox4mask, gfni_vprolb1, gfni_vprorb1, \
-			 pre_filter_bitmatrix_s1, post_filter_bitmatrix_s1, \
-			 sp1mask, sp2mask, sp3mask, sp4mask, fn_out_xor, \
-			 out_xor_dst) \
+ #define camellia_f_gfni(ab, x1, x2, x3, x4, \
+			 pre_filter_bitmatrix_s123, pre_filter_bitmatrix_s4, \
+			 post_filter_bitmatrix_s14, post_filter_bitmatrix_s2, \
+			 post_filter_bitmatrix_s3, sp1mask, sp2mask, sp3mask, \
+			 sp4mask, fn_out_xor, out_xor_dst) \
+	/* camellia sboxes s1, s2, s3, s4 */ \
+	vgf2p8affineqb $(pre_filter_constant_s1234), \
+		       pre_filter_bitmatrix_s4, ab, x4; \
+	vgf2p8affineqb $(pre_filter_constant_s1234), \
+		       pre_filter_bitmatrix_s123, ab, x1; \
+	vgf2p8affineinvqb $(post_filter_constant_s14), \
+			  post_filter_bitmatrix_s14, x4, x4; \
+	vgf2p8affineinvqb $(post_filter_constant_s2), \
+			  post_filter_bitmatrix_s2, x1, x2; \
+	vgf2p8affineinvqb $(post_filter_constant_s3), \
+			  post_filter_bitmatrix_s3, x1, x3; \
+	vgf2p8affineinvqb $(post_filter_constant_s14), \
+			  post_filter_bitmatrix_s14, x1, x1; \
 	\
-	/* input rotation for sbox4 (<<< 1) */ \
-	vgf2p8affineqb $0, gfni_vprolb1, ab, t0; \
-	vpblendmb t0, ab, x{k_sbox4mask}; \
+	/* permutation */ \
+	vpshufb sp4mask, x4, x4; \
+	vpshufb sp2mask, x2, x2; \
+	vpshufb sp3mask, x3, x3; \
+	vpshufb sp1mask, x1, x1; \
+	vpxor x4, x2, x2; \
+	vpternlogd $0x96, x1, x2, x3; \
+	vpsrldq $8, x3, x2; \
 	\
-	/* AES subbytes */ \
-	vgf2p8affineqb $(pre_filter_constant_s1), \
-		       pre_filter_bitmatrix_s1, x, x; \
-	vgf2p8affineinvqb $(post_filter_constant_s1), \
-			  post_filter_bitmatrix_s1, x, x; \
-	\
-	/* output rotation for sbox2 (<<< 1) */ \
-	/* output rotation for sbox3 (>>> 1) */ \
-	vgf2p8affineqb $0, gfni_vprolb1, x, t0; \
-	vgf2p8affineqb $0, gfni_vprorb1, x, t1; \
-	vpshufb sp4mask, x, t2; \
-	vpshufb sp1mask, x, x; \
-	vpshufb sp2mask, t0, t0; \
-	vpshufb sp3mask, t1, t1; \
-	\
-	vpternlogd $0x96, x, t2, t0; \
-	vpxor t1, t0, t0; \
-	vpsrldq $8, t0, x; \
-	fn_out_xor(t0, x, out_xor_dst);
+	/* output xor */ \
+	fn_out_xor(x3, x2, out_xor_dst);
 
  #define camellia_f_xor_cd(t0, x, cd) \
 	vpternlogd $0x96, t0, x, cd;
 
  #define preload_camellia_f_consts() \
-	kmovb .Lk_one(%rip), %k1; \
-	kmovb .Lk_sbox4mask(%rip), %k2; \
-	vpbroadcastq .Lgfni_vprolb1(%rip), %xmm13; \
-	vpbroadcastq .Lgfni_vprorb1(%rip), %xmm12; \
-	vpbroadcastq .Lpre_filter_bitmatrix_s1(%rip), %xmm11; \
-	vpbroadcastq .Lpost_filter_bitmatrix_s1(%rip), %xmm10; \
+	kxnorb %k1, %k1, %k1; \
+	kshiftrb $7, %k1, %k1; \
+	vmovq .Lpre_filter_bitmatrix_s123(%rip), %xmm14; \
+	vmovq .Lpre_filter_bitmatrix_s4(%rip), %xmm13; \
+	vmovq .Lpost_filter_bitmatrix_s14(%rip), %xmm12; \
+	vmovq .Lpost_filter_bitmatrix_s2(%rip), %xmm11; \
+	vmovq .Lpost_filter_bitmatrix_s3(%rip), %xmm10; \
 	vmovdqa .Lsp1mask_swap32_gfni(%rip), %xmm9; \
 	vmovdqa .Lsp2mask_swap32_gfni(%rip), %xmm8; \
 	vmovdqa .Lsp3mask_swap32_gfni(%rip), %xmm7; \
 	vmovdqa .Lsp4mask_swap32_gfni(%rip), %xmm6;
 
- #define do_camellia_f(ab, cd, x, t0, t1, t2, t3, t4) \
-	camellia_f_gfni(ab, x, t0, t1, t2, %k2, \
-			%xmm13, %xmm12, %xmm11, %xmm10, \
+ #define do_camellia_f(ab, cd, x, t0, t1, t2, _, __) \
+	camellia_f_gfni(ab, x, t0, t1, t2, \
+			%xmm14, %xmm13, %xmm12, %xmm11, %xmm10, \
 			%xmm9, %xmm8, %xmm7, %xmm6, \
 			camellia_f_xor_cd, cd);
 
@@ -1045,7 +1074,6 @@ camellia_decrypt_16blks_simd128:
 
   #define clear_regs() \
 	kxorq %k1, %k1, %k1; \
-	kxorq %k2, %k2, %k2; \
 	vzeroall;
 
 #else
@@ -1055,8 +1083,7 @@ camellia_decrypt_16blks_simd128:
 	vpxor x, cd, cd;
 
  #define preload_camellia_f_consts() \
-	vmovdqa .Linv_shift_row_and_unpcklbw_sp2n3_swap32(%rip), %xmm8; \
-	vmovq .Lsbox4_input_mask_swap32(%rip), %xmm9; \
+	vmovdqa .Linv_shift_row_and_unpcklbw_sp2n3_swap32(%rip), %xmm9; \
 	vbroadcastss .L0f0f0f0f(%rip), %xmm10; \
 	vmovdqa .Lpre_tf_lo_s1(%rip), %xmm11; \
 	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm12; \
@@ -1066,7 +1093,7 @@ camellia_decrypt_16blks_simd128:
 
  #define do_camellia_f(ab, cd, x, t0, t1, t2, t3, t4) \
 	camellia_f_core(ab, x, t0, t1, t2, t3, t4, \
-			%xmm8, %xmm9, %xmm10, %xmm11, %xmm12, \
+			%xmm9, %xmm10, %xmm11, %xmm12, \
 			%xmm13, %xmm14, %xmm15, .Lsp4mask_swap32(%rip), \
 			camellia_f_xor_cd, cd);
 
@@ -1146,9 +1173,9 @@ camellia_decrypt_16blks_simd128:
 	vmovq ab, 8(dst); \
 	vmovq cd, 0(dst);
 
-.align 16
-
 #ifdef USE_AVX512_GFNI
+
+.align 16
 
 /* Shuffling constants for AVX512+GFNI 1-way variant. */
 .Lsp1mask_swap32_gfni:
@@ -1164,41 +1191,19 @@ camellia_decrypt_16blks_simd128:
 	.byte 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff
 	.byte 0x05, 0xff, 0x05, 0x05, 0x05, 0xff, 0x05, 0x05
 
-.Lk_sbox4mask:
-	.byte (1 << 0) | (1 << 5)
-.Lk_one:
-	.byte 1
-
 .align 8
 
-/* Bit-matrix for byte rotate left by 1: */
-.Lgfni_vprolb1:
-	.quad BM8X8(BV8(0, 0, 0, 0, 0, 0, 0, 1),
-		    BV8(1, 0, 0, 0, 0, 0, 0, 0),
-		    BV8(0, 1, 0, 0, 0, 0, 0, 0),
-		    BV8(0, 0, 1, 0, 0, 0, 0, 0),
-		    BV8(0, 0, 0, 1, 0, 0, 0, 0),
-		    BV8(0, 0, 0, 0, 1, 0, 0, 0),
-		    BV8(0, 0, 0, 0, 0, 1, 0, 0),
-		    BV8(0, 0, 0, 0, 0, 0, 1, 0))
-
-/* Bit-matrix for byte rotate right by 1: */
-.Lgfni_vprorb1:
-	.quad BM8X8(BV8(0, 1, 0, 0, 0, 0, 0, 0),
-		    BV8(0, 0, 1, 0, 0, 0, 0, 0),
-		    BV8(0, 0, 0, 1, 0, 0, 0, 0),
-		    BV8(0, 0, 0, 0, 1, 0, 0, 0),
-		    BV8(0, 0, 0, 0, 0, 1, 0, 0),
-		    BV8(0, 0, 0, 0, 0, 0, 1, 0),
-		    BV8(0, 0, 0, 0, 0, 0, 0, 1),
-		    BV8(1, 0, 0, 0, 0, 0, 0, 0))
-
-/* Pre-filters and post-filters bit-matrixes for Camellia sbox s1.
+/* Pre-filters and post-filters bit-matrixes for Camellia sboxes s1, s2, s3
+ * and s4.
  *   See http://urn.fi/URN:NBN:fi:oulu-201305311409, pages 43-48.
+ *
+ * Pre-filters are directly from above source, "θ₁"/"θ₄". Post-filters are
+ * combination of function "A" (AES SubBytes affine transformation) and
+ * "ψ₁"/"ψ₂"/"ψ₃".
  */
 
 /* Bit-matrix from "θ₁(x)" function: */
-.Lpre_filter_bitmatrix_s1:
+.Lpre_filter_bitmatrix_s123:
 	.quad BM8X8(BV8(1, 1, 1, 0, 1, 1, 0, 1),
 		    BV8(0, 0, 1, 1, 0, 0, 1, 0),
 		    BV8(1, 1, 0, 1, 0, 0, 0, 0),
@@ -1208,8 +1213,19 @@ camellia_decrypt_16blks_simd128:
 		    BV8(0, 0, 1, 0, 1, 1, 0, 0),
 		    BV8(1, 0, 0, 0, 0, 1, 1, 0))
 
+/* Bit-matrix from "θ₄(x)" function: */
+.Lpre_filter_bitmatrix_s4:
+	.quad BM8X8(BV8(1, 1, 0, 1, 1, 0, 1, 1),
+		    BV8(0, 1, 1, 0, 0, 1, 0, 0),
+		    BV8(1, 0, 1, 0, 0, 0, 0, 1),
+		    BV8(0, 1, 1, 0, 0, 1, 1, 1),
+		    BV8(0, 0, 0, 1, 1, 0, 0, 0),
+		    BV8(0, 1, 0, 0, 1, 0, 0, 1),
+		    BV8(0, 1, 0, 1, 1, 0, 0, 0),
+		    BV8(0, 0, 0, 0, 1, 1, 0, 1))
+
 /* Bit-matrix from "ψ₁(A(x))" function: */
-.Lpost_filter_bitmatrix_s1:
+.Lpost_filter_bitmatrix_s14:
 	.quad BM8X8(BV8(0, 0, 0, 0, 0, 0, 0, 1),
 		    BV8(0, 1, 1, 0, 0, 1, 1, 0),
 		    BV8(1, 0, 1, 1, 1, 1, 1, 0),
@@ -1219,7 +1235,31 @@ camellia_decrypt_16blks_simd128:
 		    BV8(0, 1, 1, 1, 1, 1, 1, 1),
 		    BV8(0, 0, 0, 1, 1, 1, 0, 0))
 
+/* Bit-matrix from "ψ₂(A(x))" function: */
+.Lpost_filter_bitmatrix_s2:
+	.quad BM8X8(BV8(0, 0, 0, 1, 1, 1, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 0, 0, 1),
+		    BV8(0, 1, 1, 0, 0, 1, 1, 0),
+		    BV8(1, 0, 1, 1, 1, 1, 1, 0),
+		    BV8(0, 0, 0, 1, 1, 0, 1, 1),
+		    BV8(1, 0, 0, 0, 1, 1, 1, 0),
+		    BV8(0, 1, 0, 1, 1, 1, 1, 0),
+		    BV8(0, 1, 1, 1, 1, 1, 1, 1))
+
+/* Bit-matrix from "ψ₃(A(x))" function: */
+.Lpost_filter_bitmatrix_s3:
+	.quad BM8X8(BV8(0, 1, 1, 0, 0, 1, 1, 0),
+		    BV8(1, 0, 1, 1, 1, 1, 1, 0),
+		    BV8(0, 0, 0, 1, 1, 0, 1, 1),
+		    BV8(1, 0, 0, 0, 1, 1, 1, 0),
+		    BV8(0, 1, 0, 1, 1, 1, 1, 0),
+		    BV8(0, 1, 1, 1, 1, 1, 1, 1),
+		    BV8(0, 0, 0, 1, 1, 1, 0, 0),
+		    BV8(0, 0, 0, 0, 0, 0, 0, 1))
+
 #else
+
+.align 16
 
 /* Shuffling constants for AVX+AESNI 1-way variant. */
 .Linv_shift_row_and_unpcklbw_sp2n3_swap32:
@@ -1237,8 +1277,6 @@ camellia_decrypt_16blks_simd128:
 .Lsp4mask_swap32:
 	.byte 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff
 	.byte 0x01, 0xff, 0x01, 0x01, 0x01, 0xff, 0x01, 0x01
-.Lsbox4_input_mask_swap32:
-	.byte 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00
 
 #endif
 
@@ -1353,11 +1391,11 @@ camellia_decrypt_1blk_simd128:
  *  ab: 64-bit AB state
  *  cd: 64-bit CD state
  */
-#define camellia_f(ab, x, t0, t1, t2, t3, t4, inv_shift_row, sbox4mask, \
+#define camellia_f(ab, x, t0, t1, t2, t3, t4, inv_shift_row, \
 		   _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, key) \
 	vmovq key, t0; \
 	vpxor ab, t0, x; \
-	camellia_f_core(x, x, t0, t1, t2, t3, t4, inv_shift_row, sbox4mask, \
+	camellia_f_core(x, x, t0, t1, t2, t3, t4, inv_shift_row, \
 			_0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, \
 			.Lsp1110111010011110mask(%rip), \
 			.Lsp0222022222000222mask(%rip), \
@@ -1393,8 +1431,6 @@ camellia_decrypt_1blk_simd128:
 .Lsp3033303303303033mask:
 	.long 0x04ff0404, 0x04ff0404;
 	.long 0xff0a0aff, 0x0aff0a0a;
-.Lsbox4_input_mask:
-	.byte 0x00, 0xff, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00;
 .Lsigma1:
 	.long 0x3BCC908B, 0xA09E667F;
 .Lsigma2:
@@ -1422,7 +1458,6 @@ __camellia_avx_setup128:
 	vpshufb .Lbswap128_mask(%rip), KL128, KL128;
 
 	vmovdqa .Linv_shift_row_and_unpcklbw(%rip), %xmm11;
-	vmovq .Lsbox4_input_mask(%rip), %xmm12;
 	vbroadcastss .L0f0f0f0f(%rip), %xmm13;
 	vmovdqa .Lpre_tf_lo_s1(%rip), %xmm14;
 	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm15;
@@ -1437,18 +1472,18 @@ __camellia_avx_setup128:
 
 	camellia_f(%xmm2, %xmm4, %xmm1,
 		   %xmm5, %xmm6, %xmm7, %xmm8,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma1(%rip));
+		   %xmm11,  %xmm13, %xmm14, %xmm15, .Lsigma1(%rip));
 	vpxor %xmm4, %xmm3, %xmm3;
 	camellia_f(%xmm3, %xmm2, %xmm1,
 		   %xmm5, %xmm6, %xmm7, %xmm8,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma2(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma2(%rip));
 	camellia_f(%xmm2, %xmm3, %xmm1,
 		   %xmm5, %xmm6, %xmm7, %xmm8,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma3(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma3(%rip));
 	vpxor %xmm4, %xmm3, %xmm3;
 	camellia_f(%xmm3, %xmm4, %xmm1,
 		   %xmm5, %xmm6, %xmm7, %xmm8,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma4(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma4(%rip));
 
 	vpslldq $8, %xmm3, %xmm3;
 	vpxor %xmm4, %xmm2, %xmm2;
@@ -1767,7 +1802,6 @@ __camellia_avx_setup256:
 	vpshufb .Lbswap128_mask(%rip), KR128, KR128;
 
 	vmovdqa .Linv_shift_row_and_unpcklbw(%rip), %xmm11;
-	vmovq .Lsbox4_input_mask(%rip), %xmm12;
 	vbroadcastss .L0f0f0f0f(%rip), %xmm13;
 	vmovdqa .Lpre_tf_lo_s1(%rip), %xmm14;
 	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm15;
@@ -1783,20 +1817,20 @@ __camellia_avx_setup256:
 
 	camellia_f(%xmm2, %xmm4, %xmm5,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma1(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma1(%rip));
 	vpxor %xmm4, %xmm3, %xmm3;
 	camellia_f(%xmm3, %xmm2, %xmm5,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma2(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma2(%rip));
 	vpxor %xmm6, %xmm2, %xmm2;
 	camellia_f(%xmm2, %xmm3, %xmm5,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma3(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma3(%rip));
 	vpxor %xmm4, %xmm3, %xmm3;
 	vpxor KR128, %xmm3, %xmm3;
 	camellia_f(%xmm3, %xmm4, %xmm5,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma4(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma4(%rip));
 
 	vpslldq $8, %xmm3, %xmm3;
 	vpxor %xmm4, %xmm2, %xmm2;
@@ -1814,12 +1848,12 @@ __camellia_avx_setup256:
 
 	camellia_f(%xmm4, %xmm5, %xmm6,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma5(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma5(%rip));
 	vpxor %xmm5, %xmm3, %xmm3;
 
 	camellia_f(%xmm3, %xmm5, %xmm6,
 		   %xmm7, %xmm8, %xmm9, %xmm10,
-		   %xmm11, %xmm12, %xmm13, %xmm14, %xmm15, .Lsigma6(%rip));
+		   %xmm11, %xmm13, %xmm14, %xmm15, .Lsigma6(%rip));
 	vpslldq $8, %xmm3, %xmm3;
 	vpxor %xmm5, %xmm4, %xmm4;
 	vpsrldq $8, %xmm3, %xmm3;
