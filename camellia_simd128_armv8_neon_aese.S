@@ -671,7 +671,7 @@ camellia_neon_consts:
 .align  5
 camellia_encrypt_16blks_simd128:
     // === PROLOGUE ===
-    stp     x29,x30,[sp,#-144]!
+    stp     x29,x30,[sp,#-400]!
     mov     x29,sp
     
     stp     q8,q9,[sp,#16]
@@ -693,9 +693,9 @@ camellia_encrypt_16blks_simd128:
     inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
                  x2, x0, v16, x4)
 
-    // Set up temp buffer pointers using vout_ptr (x1)
-    mov     x10,x1          // x10 -> vout
-    add     x11,x1,#128     // x11 -> vout + 128
+    // Set up temp buffer pointers using stack
+    add     x10,sp,#128     // x10 -> sp + 128 + 0*128
+    add     x11,sp,#256     // x11 -> sp + 128 + 1*128
 
     // Call inpack16_post: byte-slices v0-v15, stores to mem_ab(x10), mem_cd(x11)
     // Clobbers: v16, v17 and x4
@@ -773,7 +773,7 @@ camellia_encrypt_16blks_simd128:
     ldp     q12,q13,[sp,#80]
     ldp     q14,q15,[sp,#112]
 
-    ldp     x29,x30,[sp],#144
+    ldp     x29,x30,[sp],#400
     ret
 .size   camellia_encrypt_16blks_simd128,.-camellia_encrypt_16blks_simd128
 
@@ -782,7 +782,7 @@ camellia_encrypt_16blks_simd128:
 .align  5
 camellia_decrypt_16blks_simd128:
     // === PROLOGUE ===
-    stp     x29,x30,[sp,#-144]!
+    stp     x29,x30,[sp,#-400]!
     mov     x29,sp
     
     stp     q8,q9,[sp,#16]
@@ -806,9 +806,9 @@ camellia_decrypt_16blks_simd128:
     inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
                  x2, x4, v16, x5)
 
-    // Set up temp buffer pointers using vout_ptr (x1)
-    mov     x10,x1          // x10 -> vout
-    add     x11,x1,#128     // x11 -> vout + 128
+    // Set up temp buffer pointers using stack
+    add     x10,sp,#128     // x10 -> sp + 128 + 0*128
+    add     x11,sp,#256     // x11 -> sp + 128 + 1*128
 
     // Call inpack16_post: byte-slices v0-v15, stores to mem_ab(x10), mem_cd(x11)
     // Clobbers: v16, v17 and x4
@@ -885,7 +885,7 @@ camellia_decrypt_16blks_simd128:
     ldp     q12,q13,[sp,#80]
     ldp     q14,q15,[sp,#112]
 
-    ldp     x29,x30,[sp],#144
+    ldp     x29,x30,[sp],#400
     ret
 .size   camellia_decrypt_16blks_simd128,.-camellia_decrypt_16blks_simd128
 
