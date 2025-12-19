@@ -930,13 +930,6 @@ camellia_decrypt_16blks_simd128:
 	/* 16-bit fields in full 128-bit XMM. This is to allow faster */ \
 	/* byte rotation for s2&s3 as SSE/AVX lacks native byte */ \
 	/* shift/rotation instructions. */ \
-	/* Note: Revisit when porting to architecture with native byte */ \
-	/* shift/rotation instructions. If target has variable */ \
-	/* shift/rotation instruction (shift count in vector register), */ \
-	/* structure of this macro should follow the GFNI variant seen */ \
-	/* below. That is: calculate sboxes and rotations in lower 64-bit */ \
-	/* of XMM register followed by s1-s4 permutations from 64-bit to */ \
-	/* 128-bit and XOR back to 64-bit. */ \
 	vpshufb inv_shift_row_n_s2n3_shuffle, t4, t1; \
 	\
 	vpshufb sp1mask, t4, t4; \
