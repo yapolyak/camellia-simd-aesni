@@ -352,24 +352,35 @@ static uint64_t curr_clock_nsecs(void)
   return (uint64_t)ts.tv_sec * 1000 * 1000 * 1000 + ts.tv_nsec;
 }
 
+static bool unaligned_mode;
+
 static void print_result(const char *variant, uint64_t num_bytes,
 			 uint64_t elapsed_nsecs)
 {
+  char mode_variant[128];
   double mebi_per_sec, mega_per_sec;
+
+  if (unaligned_mode) {
+    snprintf(mode_variant, sizeof(mode_variant), "unaligned %44s", variant);
+  } else {
+    snprintf(mode_variant, sizeof(mode_variant), "%44s", variant);
+  }
 
   mebi_per_sec = num_bytes * 1e9 / (1024.0 * 1024 * elapsed_nsecs);
   mega_per_sec = num_bytes * 1e9 / (1e6 * elapsed_nsecs);
-  printf("%44s: %10.3f Mebibytes/s, %10.3f Megabytes/s\n",
-	 variant, mebi_per_sec, mega_per_sec);
+  printf("%s: %10.3f Mebibytes/s, %10.3f Megabytes/s\n",
+	 mode_variant, mebi_per_sec, mega_per_sec);
   fflush(stdout);
 }
 
-static void do_speedtest(void)
+static void do_speedtest(bool unaligned)
 {
-  const uint64_t test_nsecs = 1ULL * 1000 * 1000 * 1000;
+  uint64_t test_nsecs = 1ULL * 1000 * 1000 * 1000;
   struct camellia_simd_ctx ctx_simd;
   CAMELLIA_KEY ctx_ref = { 0 };
   uint8_t tmp[16 * 32 * 16] __attribute__((aligned(64)));
+  uint8_t tmp_unaligned[16 * 32 * 16 + 1] __attribute__((aligned(64)));
+  uint8_t *tmp_ptr = tmp;
   uint64_t start_time;
   uint64_t end_time;
   uint64_t total_bytes;
@@ -378,13 +389,20 @@ static void do_speedtest(void)
   for (i = 0; i < sizeof(tmp); i++)
     tmp[i] = ((i + 3221) * 1231) & 0xff;
 
+  unaligned_mode = unaligned;
+  if (unaligned) {
+    memcpy(tmp_unaligned + 1, tmp, sizeof(tmp));
+    tmp_ptr = tmp_unaligned + 1;
+    test_nsecs = test_nsecs / 10;
+  }
+
   /* Test speed of reference implementation. */
   total_bytes = 0;
   Camellia_set_key(test_vector_key_128, 128, &ctx_ref);
 
   start_time = curr_clock_nsecs();
   do {
-    Camellia_encrypt_nblks(tmp, tmp, sizeof(tmp) / 16, &ctx_ref);
+    Camellia_encrypt_nblks(tmp_ptr, tmp_ptr, sizeof(tmp) / 16, &ctx_ref);
     total_bytes += sizeof(tmp) - sizeof(tmp) % 16;
     end_time = curr_clock_nsecs();
   } while (start_time + test_nsecs > end_time);
@@ -397,7 +415,7 @@ static void do_speedtest(void)
 
   start_time = curr_clock_nsecs();
   do {
-    Camellia_decrypt_nblks(tmp, tmp, sizeof(tmp) / 16, &ctx_ref);
+    Camellia_decrypt_nblks(tmp_ptr, tmp_ptr, sizeof(tmp) / 16, &ctx_ref);
     total_bytes += sizeof(tmp) - sizeof(tmp) % 16;
     end_time = curr_clock_nsecs();
   } while (start_time + test_nsecs > end_time);
@@ -413,7 +431,7 @@ static void do_speedtest(void)
     start_time = curr_clock_nsecs();
     do {
       for (j = 0; j < sizeof(tmp); ) {
-	camellia_encrypt_1blk_simd128(&ctx_simd, &tmp[j], &tmp[j]);
+	camellia_encrypt_1blk_simd128(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
 	j += 16;
 	total_bytes += 16;
       }
@@ -429,7 +447,7 @@ static void do_speedtest(void)
     start_time = curr_clock_nsecs();
     do {
       for (j = 0; j < sizeof(tmp); ) {
-	camellia_decrypt_1blk_simd128(&ctx_simd, &tmp[j], &tmp[j]);
+	camellia_decrypt_1blk_simd128(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
 	j += 16;
 	total_bytes += 16;
       }
@@ -447,7 +465,7 @@ static void do_speedtest(void)
   start_time = curr_clock_nsecs();
   do {
     for (j = 0; j < sizeof(tmp); ) {
-      camellia_encrypt_16blks_simd128(&ctx_simd, &tmp[j], &tmp[j]);
+      camellia_encrypt_16blks_simd128(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
       j += 16 * 16;
       total_bytes += 16 * 16;
     }
@@ -463,7 +481,7 @@ static void do_speedtest(void)
   start_time = curr_clock_nsecs();
   do {
     for (j = 0; j < sizeof(tmp); ) {
-      camellia_decrypt_16blks_simd128(&ctx_simd, &tmp[j], &tmp[j]);
+      camellia_decrypt_16blks_simd128(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
       j += 16 * 16;
       total_bytes += 16 * 16;
     }
@@ -481,7 +499,7 @@ static void do_speedtest(void)
   start_time = curr_clock_nsecs();
   do {
     for (j = 0; j < sizeof(tmp); ) {
-      camellia_encrypt_32blks_simd256(&ctx_simd, &tmp[j], &tmp[j]);
+      camellia_encrypt_32blks_simd256(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
       j += 32 * 16;
       total_bytes += 32 * 16;
     }
@@ -497,7 +515,7 @@ static void do_speedtest(void)
   start_time = curr_clock_nsecs();
   do {
     for (j = 0; j < sizeof(tmp); ) {
-      camellia_decrypt_32blks_simd256(&ctx_simd, &tmp[j], &tmp[j]);
+      camellia_decrypt_32blks_simd256(&ctx_simd, &tmp_ptr[j], &tmp_ptr[j]);
       j += 32 * 16;
       total_bytes += 32 * 16;
     }
@@ -515,7 +533,9 @@ int main(int argc, const char *argv[])
 
   do_selftest();
 
-  do_speedtest();
+  do_speedtest(false);
+
+  do_speedtest(true);
 
   return 0;
 }
