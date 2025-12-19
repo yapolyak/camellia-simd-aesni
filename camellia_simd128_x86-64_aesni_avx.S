@@ -992,17 +992,17 @@ camellia_decrypt_16blks_simd128:
  * "ψ₁"/"ψ₂"/"ψ₃".
  */
 
-/* Constant from "θ₁(x)" and "θ₄(x)" functions. */
-#define pre_filter_constant_s1234 BV8(1, 0, 1, 0, 0, 0, 1, 0)
+ /* Constant from "θ₁(x)" and "θ₄(x)" functions. */
+ #define pre_filter_constant_s1234 BV8(1, 0, 1, 0, 0, 0, 1, 0)
 
-/* Constant from "ψ₁(A(x))" function: */
-#define post_filter_constant_s14  BV8(0, 1, 1, 1, 0, 1, 1, 0)
+ /* Constant from "ψ₁(A(x))" function: */
+ #define post_filter_constant_s14  BV8(0, 1, 1, 1, 0, 1, 1, 0)
 
-/* Constant from "ψ₂(A(x))" function: */
-#define post_filter_constant_s2   BV8(0, 0, 1, 1, 1, 0, 1, 1)
+ /* Constant from "ψ₂(A(x))" function: */
+ #define post_filter_constant_s2   BV8(0, 0, 1, 1, 1, 0, 1, 1)
 
-/* Constant from "ψ₃(A(x))" function: */
-#define post_filter_constant_s3   BV8(1, 1, 1, 0, 1, 1, 0, 0)
+ /* Constant from "ψ₃(A(x))" function: */
+ #define post_filter_constant_s3   BV8(1, 1, 1, 0, 1, 1, 0, 0)
 
  /* Camellia F function, AVX512+GFNI version */
  #define camellia_f_gfni(ab, x1, x2, x3, x4, \
@@ -1013,10 +1013,10 @@ camellia_decrypt_16blks_simd128:
 	/* camellia sboxes s1, s2, s3, s4 */ \
 	vgf2p8affineqb $(pre_filter_constant_s1234), \
 		       pre_filter_bitmatrix_s4, ab, x4; \
-	vgf2p8affineqb $(pre_filter_constant_s1234), \
-		       pre_filter_bitmatrix_s123, ab, x1; \
 	vgf2p8affineinvqb $(post_filter_constant_s14), \
 			  post_filter_bitmatrix_s14, x4, x4; \
+	vgf2p8affineqb $(pre_filter_constant_s1234), \
+		       pre_filter_bitmatrix_s123, ab, x1; \
 	vgf2p8affineinvqb $(post_filter_constant_s2), \
 			  post_filter_bitmatrix_s2, x1, x2; \
 	vgf2p8affineinvqb $(post_filter_constant_s3), \
@@ -1062,15 +1062,14 @@ camellia_decrypt_16blks_simd128:
 	vpxorq key, cd, cd{%k1}{z};
 
  #define do_fls_blk1(ll, lr, rl, rr, t0, t1, kll, klr, krl, krr) \
+	  vpternlogd $0x1E, krr, rr, rl{%k1}{z}; \
 	vpandd kll, ll, t0{%k1}{z}; \
+	  vpandd krl, rl, t1{%k1}{z}; \
 	vprold $1, t0, t0; \
+	  vprold $1, t1, t1; \
 	vpxor t0, lr, lr; \
-	vpternlogd $0x1E, klr, lr, ll{%k1}{z}; \
-	\
-	vpternlogd $0x1E, krr, rr, rl{%k1}{z}; \
-	vpandd krl, rl, t1{%k1}{z}; \
-	vprold $1, t1, t1; \
-	vpxor t1, rr, rr;
+	  vpxor t1, rr, rr; \
+	vpternlogd $0x1E, klr, lr, ll{%k1}{z};
 
   #define clear_regs() \
 	kxorq %k1, %k1, %k1; \
@@ -1150,8 +1149,8 @@ camellia_decrypt_16blks_simd128:
 	two_roundsm_blk1(ab, cd, t0, t1, t2, t3, t4, t5, (i) + 3, -1);
 
 #define fls_blk1(ll_lr, rl_rr, tmp_lr, tmp_rr, t0, t1, kll, klr, krl, krr) \
-	vpsrlq $32, ll_lr, tmp_lr; \
 	vpsrlq $32, rl_rr, tmp_rr; \
+	vpsrlq $32, ll_lr, tmp_lr; \
 	do_fls_blk1(ll_lr, tmp_lr, rl_rr, tmp_rr, t0, t1, kll, klr, krl, krr); \
 	vpunpckldq tmp_lr, ll_lr, ll_lr; \
 	vpunpckldq tmp_rr, rl_rr, rl_rr;
