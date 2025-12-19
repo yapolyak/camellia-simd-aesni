@@ -66,7 +66,7 @@
     filter_8bit_neon(v4,v18,v19,v16,v28); \
     filter_8bit_neon(v2,v18,v19,v16,v28); \
     filter_8bit_neon(v5,v18,v19,v16,v28); \
-    eor  v15.16b, v15.16b, v15.16b; \
+    movi    v15.16b, #0; \
     filter_8bit_neon(v3,v20,v21,v16,v28); \
     filter_8bit_neon(v6,v20,v21,v16,v28); \
 \
@@ -999,7 +999,7 @@ __camellia_setup128_neon:
     ldp     q26,q27,[x1],#32    //sp0222/sp3033
 
     // Prepare zero vector
-    eor     v31.16b,v31.16b,v31.16b
+    movi    v31.16b,#0
     
     // === INITIAL KEY HANDLING ===
     // Byte swap input key KL128 (v0) using v16
@@ -1480,7 +1480,7 @@ __camellia_setup256_neon:
     ldp     q26,q27,[x1],#32    //sp0222/sp3033
 
     // Prepare zero vector
-    eor     v31.16b,v31.16b,v31.16b
+    movi    v31.16b,#0
     
     tbl     KL128.16b,{KL128.16b},v16.16b
     tbl     KR128.16b,{KR128.16b},v16.16b
