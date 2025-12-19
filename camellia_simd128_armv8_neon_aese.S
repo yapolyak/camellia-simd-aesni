@@ -37,7 +37,6 @@
  * OUT:
  *  v0..v7: new byte-sliced CD state
  * Clobbers:
- *  x5 - key value
  *  v8..v15: broadcasted key values
  *  v16: mask_0f
  *  v17: inv_shift_row
@@ -46,7 +45,7 @@
  */
 #define roundsm16(v0, v1, v2, v3, v4, v5, v6, v7, mem_cd, key) \
     /* Load 64-bit round key */ \
-    ldr     x5,[key]; \
+    ldr     d31,[key]; \
 \
     /* S-FUNCTION (PRE-AES) */ \
 \
@@ -67,19 +66,19 @@
     filter_8bit_neon(v4,v18,v19,v16,v28); \
     filter_8bit_neon(v2,v18,v19,v16,v28); \
     filter_8bit_neon(v5,v18,v19,v16,v28); \
-    eor  v31.16b, v31.16b, v31.16b; \
+    eor  v15.16b, v15.16b, v15.16b; \
     filter_8bit_neon(v3,v20,v21,v16,v28); \
     filter_8bit_neon(v6,v20,v21,v16,v28); \
 \
     /* AES CORE */ \
-    aese v0.16b, v31.16b; \
-    aese v7.16b, v31.16b; \
-    aese v1.16b, v31.16b; \
-    aese v4.16b, v31.16b; \
-    aese v2.16b, v31.16b; \
-    aese v5.16b, v31.16b; \
-    aese v3.16b, v31.16b; \
-    aese v6.16b, v31.16b; \
+    aese v0.16b, v15.16b; \
+    aese v7.16b, v15.16b; \
+    aese v1.16b, v15.16b; \
+    aese v4.16b, v15.16b; \
+    aese v2.16b, v15.16b; \
+    aese v5.16b, v15.16b; \
+    aese v3.16b, v15.16b; \
+    aese v6.16b, v15.16b; \
 \
     /* Post-Filter */ \
     filter_8bit_neon(v0,v22,v23,v16,v28); \
@@ -94,8 +93,6 @@
     filter_8bit_neon(v4,v24,v25,v16,v28); \
 \
     /* Interleaved P-function and key broadcasting */ \
-    fmov    d31,x5; \
-\
     eor     v0.16b,v0.16b,v5.16b; \
     movi    v29.16b,#3;\
     eor     v1.16b,v1.16b,v6.16b; \
@@ -262,12 +259,9 @@
  *   v0..v7: new byte-sliced CD state
  *   Updated AB nd CD states written to memory
  * Clobbers:
- *  x5-x7: storage for keys
  *  v8-v15,v16-19,v28-v31: temporary vectors
  */
 #define fls16(v0, v1, v2, v3, v4, v5, v6, v7, mem_l, mem_r, key_a_ptr, key_b_ptr) \
-    ldr     x5,[key_a_ptr]; /*x5={klr,kll}*/ \
-    ldr     x6,[key_b_ptr]; /*x6={krr,krl}*/ \
 	/* \
 	 * t0 = kll; \
 	 * t0 &= ll; \
@@ -275,7 +269,7 @@
 	 */ \
     eor     v19.16b,v19.16b,v19.16b; \
     movi    v18.16b,#1; \
-    fmov    s31, w5;       /* v31 lower = kll */ \
+    ldr     s31,[key_a_ptr]; /* v31 = kll */ \
     movi    v17.16b,#2; \
     movi    v16.16b,#3; \
     tbl     v19.16b,{v31.16b},v19.16b; \
@@ -305,11 +299,10 @@
 	 * rl ^= t2; \
 	 */ \
 \
-    lsr     x7,x6,#32; \
     eor     v19.16b,v19.16b,v19.16b; \
     ldp     q8,q9,[mem_r]; /* pre-load right-hand state parts */ \
     movi    v18.16b,#1; \
-    fmov    s31,w7; \
+    ldr     s31,[key_b_ptr, #4]; /* v31 = krr */ \
     movi    v17.16b,#2; \
     movi    v16.16b,#3; \
     ldp     q10,q11,[mem_r,#32]; /* pre-load right-hand state parts */ \
@@ -339,7 +332,7 @@
 \
     eor     v19.16b,v19.16b,v19.16b; \
     movi    v18.16b,#1; \
-    fmov    s31,w6; \
+    ldr     s31,[key_b_ptr]; /* v31 = krl */ \
     movi    v17.16b,#2; \
     movi    v16.16b,#3; \
     tbl     v19.16b,{v31.16b},v19.16b; \
@@ -367,10 +360,9 @@
 	 * ll ^= t0; \
 	 */ \
 \
-    lsr     x7,x5,#32; \
     eor     v19.16b,v19.16b,v19.16b; \
     movi    v18.16b,#1; \
-    fmov    s31,w7; \
+    ldr     s31,[key_a_ptr, #4]; /* v31 = klr */ \
     movi    v17.16b,#2; \
     movi    v16.16b,#3; \
     tbl     v19.16b,{v31.16b},v19.16b; \
@@ -458,8 +450,7 @@
 #define inpack16_pre(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
                      rio_ptr, key_ptr, tmp_key, tmp_gpr) \
     /* Load and prepare key */ \
-    ldr     tmp_gpr,[key_ptr]; \
-    fmov    d16,tmp_gpr; \
+    ldr     d16,[key_ptr]; \
     ldp     q18,q19,[rio_ptr]; /* Pre-load some input */ \
     adrp    tmp_gpr,.Lpack_bswap; \
     add     tmp_gpr,tmp_gpr,:lo12:.Lpack_bswap; \
@@ -534,8 +525,7 @@
                                tmp_v0, tmp_v1, tmp_gpr); \
     \
     /* Load and prepare final key */ \
-    ldr     tmp_gpr,[key_ptr]; \
-    fmov    d18,tmp_gpr; \
+    ldr     d18,[key_ptr]; \
     adrp    tmp_gpr,.Lpack_bswap; \
     add     tmp_gpr,tmp_gpr,:lo12:.Lpack_bswap; \
     ldr     q16,[tmp_gpr]; /* Load constant into a temporary */ \
@@ -740,7 +730,7 @@ camellia_encrypt_16blks_simd128:
     // x4 -> key pointer: &key_table[k+8]
     add     x4,x13,#64
     add     x3,x13,#72
-    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses x5-x7 and v16-v19 as clobbers
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses v16-v19 as clobbers
 
     // Increment k
     add     x12,x12,#8
@@ -852,7 +842,7 @@ camellia_decrypt_16blks_simd128:
     // x4 -> key pointer: &key_table[k+8]
     add     x3,x13,#0
     add     x4,x13,#8
-    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses x5-x7 and v16-v19 as clobbers
+    fls16(v0, v1, v2, v3, v4, v5, v6, v7, x10, x11, x4, x3) // uses v16-v19 as clobbers
 
     // Decrement k
     sub     x12,x12,#8
@@ -916,8 +906,7 @@ camellia_decrypt_16blks_simd128:
 #define camellia_f(v_ab, v_x, v_t0, v_t1, v_t2, v_t3, v_t4, v_zero, \
                     inv_shift_row, sbox4mask, _0f0f0f0fmask, pre_s1lo_mask, pre_s1hi_mask, \
                     post_s1lo_mask, post_s1hi_mask, sp0044, sp1110, sp0222, sp3033, key, x_tmp) \
-    ldr     x_tmp,[key]; \
-    fmov    d6,x_tmp; /*referring to v_t0 (v6) as d6*/ \
+    ldr     d6,[key]; \
 \
     /* x = ab ^ key */ \
     eor     v_x.16b,v_ab.16b,v_t0.16b; \
