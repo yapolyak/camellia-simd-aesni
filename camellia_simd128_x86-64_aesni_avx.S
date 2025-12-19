@@ -1075,10 +1075,10 @@ camellia_decrypt_16blks_simd128:
 	vpxor x, cd, cd;
 
  #define preload_camellia_f_consts() \
-	vmovdqa .Linv_shift_row_and_unpcklbw_sp2n3_swap32(%rip), %xmm9; \
 	vbroadcastss .L0f0f0f0f(%rip), %xmm10; \
 	vmovdqa .Lpre_tf_lo_s1(%rip), %xmm11; \
 	vmovdqa .Lpre_tf_hi_s1(%rip), %xmm12; \
+	vmovdqa .Linv_shift_row_and_unpcklbw_sp2n3_swap32(%rip), %xmm9; \
 	vmovdqa .Lsp1mask_swap32(%rip), %xmm13; \
 	vmovdqa .Lsp2mask_swap32(%rip), %xmm14; \
 	vmovdqa .Lsp3mask_swap32(%rip), %xmm15; \
@@ -1165,6 +1165,21 @@ camellia_decrypt_16blks_simd128:
 	vpshufb t0, cd, cd; \
 	vmovq ab, 8(dst); \
 	vmovq cd, 0(dst);
+
+#define outunpack_inpack_blk1(ab, cd, dst, src, t0, t1, t2, t3, key_out, key_in) \
+	vmovq key_out, t1; \
+	vmovdqa .Lpack_bswap(%rip), t0; \
+	vpxor t1, cd, t2; \
+	vmovq key_in, t1; \
+	vpshufb t0, ab, t3; \
+	vpshufb t0, t2, t2; \
+	vmovq 0(src), ab; \
+	vmovq 8(src), cd; \
+	vmovq t3, 8(dst); \
+	vmovq t2, 0(dst); \
+	vpshufb t0, ab, ab; \
+	vpshufb t0, cd, cd; \
+	vpxor t1, ab, ab;
 
 #ifdef USE_AVX512_GFNI
 
@@ -1288,16 +1303,22 @@ camellia_encrypt_1blk_simd128:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst (16 bytes)
 	 *	%rdx: src (16 bytes)
+	 *	%rcx: nblocks
 	 */
+
+	cmpq $0, %rcx;
+	je .Lenc_ret_blk1;
 
 	cmpl $16, key_length(CTX);
 	movl $32, %r8d;
 	movl $24, %eax;
 	cmovel %eax, %r8d; /* max */
 
+	movq CTX, %r9;
 	leaq (-8 * 8)(CTX, %r8, 8), %r8;
 
 	inpack_blk1(%xmm0, %xmm1, %rdx, %xmm2, %xmm3, (key_table)(CTX));
+	leaq 16(%rdx), %rdx;
 
 	preload_camellia_f_consts();
 
@@ -1320,10 +1341,25 @@ camellia_encrypt_1blk_simd128:
 
 .align 8
 .Lenc_done_blk1:
+	subq $1, %rcx;
+	jz .Lenc_end_blk1;
+
+	outunpack_inpack_blk1(%xmm0, %xmm1, %rsi, %rdx,
+			      %xmm2, %xmm3, %xmm4, %xmm5,
+			      ((key_table) + 8 * 8)(CTX), (key_table)(%r9));
+
+	movq %r9, CTX;
+	leaq 16(%rsi), %rsi;
+	leaq 16(%rdx), %rdx;
+	jmp .Lenc_loop_blk1;
+
+.align 8
+.Lenc_end_blk1:
 	outunpack_blk1(%xmm0, %xmm1, %rsi, %xmm2, %xmm3,
 		       ((key_table) + 8 * 8)(CTX));
 
 	clear_regs();
+.Lenc_ret_blk1:
 	ret;
 
 .align 16
@@ -1334,7 +1370,11 @@ camellia_decrypt_1blk_simd128:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst (16 bytes)
 	 *	%rdx: src (16 bytes)
+	 *	%rcx: nblocks
 	 */
+
+	cmpq $0, %rcx;
+	je .Ldec_ret_blk1;
 
 	cmpl $16, key_length(CTX);
 	movl $32, %r8d;
@@ -1343,11 +1383,12 @@ camellia_decrypt_1blk_simd128:
 
 	leaq (key_table)(CTX, %r8, 8), %rax;
 
-	movq %r8, %rcx;
-	movq CTX, %r8
-	leaq (-8 * 8)(CTX, %rcx, 8), CTX;
+	movq %r8, %r9;
+	movq CTX, %r8;
+	leaq (-8 * 8)(CTX, %r9, 8), CTX;
 
 	inpack_blk1(%xmm0, %xmm1, %rdx, %xmm2, %xmm3, (%rax));
+	leaq 16(%rdx), %rdx;
 
 	preload_camellia_f_consts();
 
@@ -1370,9 +1411,24 @@ camellia_decrypt_1blk_simd128:
 
 .align 8
 .Ldec_done_blk1:
+	subq $1, %rcx;
+	jz .Ldec_end_blk1;
+
+	outunpack_inpack_blk1(%xmm0, %xmm1, %rsi, %rdx,
+			      %xmm2, %xmm3, %xmm4, %xmm5,
+			      (key_table)(CTX), (%rax));
+
+	leaq (-8 * 8)(CTX, %r9, 8), CTX;
+	leaq 16(%rsi), %rsi;
+	leaq 16(%rdx), %rdx;
+	jmp .Ldec_loop_blk1;
+
+.align 8
+.Ldec_end_blk1:
 	outunpack_blk1(%xmm0, %xmm1, %rsi, %xmm2, %xmm3, (key_table)(CTX));
 
 	clear_regs();
+.Ldec_ret_blk1:
 	ret;
 
 /**********************************************************************

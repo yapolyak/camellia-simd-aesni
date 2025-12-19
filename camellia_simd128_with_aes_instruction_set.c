@@ -1381,11 +1381,14 @@ int have_camellia_1blk_simd128(void)
 }
 
 void camellia_encrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
-				   const void *in)
+				   const void *in, size_t nblocks)
 {
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x10, x11, x12, x13, x14, x15;
   __m128i x9 __attribute__((unused));
   unsigned int lastk, k;
+
+  if (nblocks == 0)
+    return;
 
   preload_camellia_f_consts();
 
@@ -1394,31 +1397,40 @@ void camellia_encrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
   else
     lastk = 24;
 
-  inpack_blk1(x0, x1, in, x2, x3, ctx->key_table[0]);
+  while (nblocks) {
+    inpack_blk1(x0, x1, in, x2, x3, ctx->key_table[0]);
+    in = (const char *)in + 16;
 
-  k = 0;
-  while (1) {
-    enc_rounds_blk1(x0, x1, x2, x3, x4, x5, x6, x7, k);
+    k = 0;
+    while (1) {
+      enc_rounds_blk1(x0, x1, x2, x3, x4, x5, x6, x7, k);
 
-    if (k == lastk - 8)
-      break;
+      if (k == lastk - 8)
+	break;
 
-    fls_blk1(x0, x1, x2, x3, x4, x5,
-	     &ctx->key_table[k + 8],
-	     &ctx->key_table[k + 9]);
+      fls_blk1(x0, x1, x2, x3, x4, x5,
+	      &ctx->key_table[k + 8],
+	      &ctx->key_table[k + 9]);
 
-    k += 8;
+      k += 8;
+    }
+
+    outunpack_blk1(x0, x1, out, x2, x3, ctx->key_table[lastk]);
+    out = (char *)out + 16;
+
+    nblocks--;
   }
-
-  outunpack_blk1(x0, x1, out, x2, x3, ctx->key_table[lastk]);
 }
 
 void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
-				   const void *in)
+				   const void *in, size_t nblocks)
 {
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x10, x11, x12, x13, x14, x15;
   __m128i x9 __attribute__((unused));
   unsigned int firstk, k;
+
+  if (nblocks == 0)
+    return;
 
   preload_camellia_f_consts();
 
@@ -1427,23 +1439,29 @@ void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
   else
     firstk = 24;
 
-  inpack_blk1(x0, x1, in, x2, x3, ctx->key_table[firstk]);
+  while (nblocks) {
+    inpack_blk1(x0, x1, in, x2, x3, ctx->key_table[firstk]);
+    in = (const char *)in + 16;
 
-  k = firstk - 8;
-  while (1) {
-    dec_rounds_blk1(x0, x1, x2, x3, x4, x5, x6, x7, k);
+    k = firstk - 8;
+    while (1) {
+      dec_rounds_blk1(x0, x1, x2, x3, x4, x5, x6, x7, k);
 
-    if (k == 0)
-      break;
+      if (k == 0)
+	break;
 
-    fls_blk1(x0, x1, x2, x3, x4, x5,
-	     &ctx->key_table[k + 1],
-	     &ctx->key_table[k + 0]);
+      fls_blk1(x0, x1, x2, x3, x4, x5,
+	      &ctx->key_table[k + 1],
+	      &ctx->key_table[k + 0]);
 
-    k -= 8;
+      k -= 8;
+    }
+
+    outunpack_blk1(x0, x1, out, x2, x3, ctx->key_table[0]);
+    out = (char *)out + 16;
+
+    nblocks--;
   }
-
-  outunpack_blk1(x0, x1, out, x2, x3, ctx->key_table[0]);
 }
 
 /********* Key setup **********************************************************/
