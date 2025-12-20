@@ -1810,10 +1810,10 @@ static void __camellia_avx_setup128(struct camellia_simd_ctx *ctx, __m128i x0)
   vmovq128_memst(x4, cmll_sub(5, ctx));
   vmovq128_memst(x5, cmll_sub(6, ctx));
 
-  vmovq128(*cmll_sub(7, ctx), x7);
-  vmovq128(*cmll_sub(8, ctx), x8);
-  vmovq128(*cmll_sub(9, ctx), x9);
-  vmovq128(*cmll_sub(10, ctx), x10);
+  vmovq128_amemld(cmll_sub(7, ctx), x7);
+  vmovq128_amemld(cmll_sub(8, ctx), x8);
+  vmovq128_amemld(cmll_sub(9, ctx), x9);
+  vmovq128_amemld(cmll_sub(10, ctx), x10);
   /* tl = subl(10) ^ (subr(10) & ~subr(8)); */
   vpandn128(x10, x8, x15);
   vpsrldq128(4, x15, x15);
@@ -1830,11 +1830,11 @@ static void __camellia_avx_setup128(struct camellia_simd_ctx *ctx, __m128i x0)
   vpxor128(x0, x6, x6);
   vmovq128_memst(x6, cmll_sub(7, ctx));
 
-  vmovq128(*cmll_sub(11, ctx), x11);
-  vmovq128(*cmll_sub(12, ctx), x12);
-  vmovq128(*cmll_sub(13, ctx), x13);
-  vmovq128(*cmll_sub(14, ctx), x14);
-  vmovq128(*cmll_sub(15, ctx), x15);
+  vmovq128_amemld(cmll_sub(11, ctx), x11);
+  vmovq128_amemld(cmll_sub(12, ctx), x12);
+  vmovq128_amemld(cmll_sub(13, ctx), x13);
+  vmovq128_amemld(cmll_sub(14, ctx), x14);
+  vmovq128_amemld(cmll_sub(15, ctx), x15);
   /* tl = subl(7) ^ (subr(7) & ~subr(9)); */
   vpandn128(x7, x9, x1);
   vpsrldq128(4, x1, x1);
@@ -1859,11 +1859,11 @@ static void __camellia_avx_setup128(struct camellia_simd_ctx *ctx, __m128i x0)
   vmovq128_memst(x12, cmll_sub(13, ctx));
   vmovq128_memst(x13, cmll_sub(14, ctx));
 
-  vmovq128(*cmll_sub(16, ctx), x6);
-  vmovq128(*cmll_sub(17, ctx), x7);
-  vmovq128(*cmll_sub(18, ctx), x8);
-  vmovq128(*cmll_sub(19, ctx), x9);
-  vmovq128(*cmll_sub(20, ctx), x10);
+  vmovq128_amemld(cmll_sub(16, ctx), x6);
+  vmovq128_amemld(cmll_sub(17, ctx), x7);
+  vmovq128_amemld(cmll_sub(18, ctx), x8);
+  vmovq128_amemld(cmll_sub(19, ctx), x9);
+  vmovq128_amemld(cmll_sub(20, ctx), x10);
   /* tl = subl(18) ^ (subr(18) & ~subr(16)); */
   vpandn128(x8, x6, x1);
   vpsrldq128(4, x1, x1);
@@ -1893,10 +1893,10 @@ static void __camellia_avx_setup128(struct camellia_simd_ctx *ctx, __m128i x0)
   vpsrldq128(8, x1, x1);
   vpxor128(x1, x0, x0);
 
-  vmovq128(*cmll_sub(21, ctx), x1);
-  vmovq128(*cmll_sub(22, ctx), x2);
-  vmovq128(*cmll_sub(23, ctx), x3);
-  vmovq128(*cmll_sub(24, ctx), x4);
+  vmovq128_amemld(cmll_sub(21, ctx), x1);
+  vmovq128_amemld(cmll_sub(22, ctx), x2);
+  vmovq128_amemld(cmll_sub(23, ctx), x3);
+  vmovq128_amemld(cmll_sub(24, ctx), x4);
 
   vpxor128(x9, x0, x0);
   vpxor128(x10, x8, x8);
@@ -2251,10 +2251,10 @@ static void __camellia_avx_setup256(struct camellia_simd_ctx *ctx, __m128i x0,
   vmovq128_memst(x4, cmll_sub(5, ctx));
   vmovq128_memst(x5, cmll_sub(6, ctx));
 
-  vmovq128(*cmll_sub(7, ctx), x7);
-  vmovq128(*cmll_sub(8, ctx), x8);
-  vmovq128(*cmll_sub(9, ctx), x9);
-  vmovq128(*cmll_sub(10, ctx), x10);
+  vmovq128_amemld(cmll_sub(7, ctx), x7);
+  vmovq128_amemld(cmll_sub(8, ctx), x8);
+  vmovq128_amemld(cmll_sub(9, ctx), x9);
+  vmovq128_amemld(cmll_sub(10, ctx), x10);
   /* tl = subl(10) ^ (subr(10) & ~subr(8)); */
   vpandn128(x10, x8, x15);
   vpsrldq128(4, x15, x15);
@@ -2271,11 +2271,11 @@ static void __camellia_avx_setup256(struct camellia_simd_ctx *ctx, __m128i x0,
   vpxor128(x0, x6, x6);
   vmovq128_memst(x6, cmll_sub(7, ctx));
 
-  vmovq128(*cmll_sub(11, ctx), x11);
-  vmovq128(*cmll_sub(12, ctx), x12);
-  vmovq128(*cmll_sub(13, ctx), x13);
-  vmovq128(*cmll_sub(14, ctx), x14);
-  vmovq128(*cmll_sub(15, ctx), x15);
+  vmovq128_amemld(cmll_sub(11, ctx), x11);
+  vmovq128_amemld(cmll_sub(12, ctx), x12);
+  vmovq128_amemld(cmll_sub(13, ctx), x13);
+  vmovq128_amemld(cmll_sub(14, ctx), x14);
+  vmovq128_amemld(cmll_sub(15, ctx), x15);
   /* tl = subl(7) ^ (subr(7) & ~subr(9)); */
   vpandn128(x7, x9, x1);
   vpsrldq128(4, x1, x1);
@@ -2300,11 +2300,11 @@ static void __camellia_avx_setup256(struct camellia_simd_ctx *ctx, __m128i x0,
   vmovq128_memst(x12, cmll_sub(13, ctx));
   vmovq128_memst(x13, cmll_sub(14, ctx));
 
-  vmovq128(*cmll_sub(16, ctx), x6);
-  vmovq128(*cmll_sub(17, ctx), x7);
-  vmovq128(*cmll_sub(18, ctx), x8);
-  vmovq128(*cmll_sub(19, ctx), x9);
-  vmovq128(*cmll_sub(20, ctx), x10);
+  vmovq128_amemld(cmll_sub(16, ctx), x6);
+  vmovq128_amemld(cmll_sub(17, ctx), x7);
+  vmovq128_amemld(cmll_sub(18, ctx), x8);
+  vmovq128_amemld(cmll_sub(19, ctx), x9);
+  vmovq128_amemld(cmll_sub(20, ctx), x10);
   /* tl = subl(18) ^ (subr(18) & ~subr(16)); */
   vpandn128(x8, x6, x1);
   vpsrldq128(4, x1, x1);
@@ -2334,10 +2334,10 @@ static void __camellia_avx_setup256(struct camellia_simd_ctx *ctx, __m128i x0,
   vpsrldq128(8, x1, x1);
   vpxor128(x1, x0, x0);
 
-  vmovq128(*cmll_sub(21, ctx), x1);
-  vmovq128(*cmll_sub(22, ctx), x2);
-  vmovq128(*cmll_sub(23, ctx), x3);
-  vmovq128(*cmll_sub(24, ctx), x4);
+  vmovq128_amemld(cmll_sub(21, ctx), x1);
+  vmovq128_amemld(cmll_sub(22, ctx), x2);
+  vmovq128_amemld(cmll_sub(23, ctx), x3);
+  vmovq128_amemld(cmll_sub(24, ctx), x4);
 
   vpxor128(x9, x0, x0);
   vpxor128(x10, x8, x8);
@@ -2351,14 +2351,14 @@ static void __camellia_avx_setup256(struct camellia_simd_ctx *ctx, __m128i x0,
   vmovq128_memst(x10, cmll_sub(21, ctx));
   vmovq128_memst(x1, cmll_sub(22, ctx));
 
-  vmovq128(*cmll_sub(25, ctx), x5);
-  vmovq128(*cmll_sub(26, ctx), x6);
-  vmovq128(*cmll_sub(27, ctx), x7);
-  vmovq128(*cmll_sub(28, ctx), x8);
-  vmovq128(*cmll_sub(29, ctx), x9);
-  vmovq128(*cmll_sub(30, ctx), x10);
-  vmovq128(*cmll_sub(31, ctx), x11);
-  vmovq128(*cmll_sub(32, ctx), x12);
+  vmovq128_amemld(cmll_sub(25, ctx), x5);
+  vmovq128_amemld(cmll_sub(26, ctx), x6);
+  vmovq128_amemld(cmll_sub(27, ctx), x7);
+  vmovq128_amemld(cmll_sub(28, ctx), x8);
+  vmovq128_amemld(cmll_sub(29, ctx), x9);
+  vmovq128_amemld(cmll_sub(30, ctx), x10);
+  vmovq128_amemld(cmll_sub(31, ctx), x11);
+  vmovq128_amemld(cmll_sub(32, ctx), x12);
 
   /* tl = subl(26) ^ (subr(26) & ~subr(24)); */
   vpandn128(x6, x4, x15);
