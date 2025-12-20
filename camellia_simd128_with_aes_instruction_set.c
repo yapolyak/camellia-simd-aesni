@@ -210,7 +210,8 @@ static const uint8x16_t shift_row __attribute((unused)) =
 /* Following operations may have unaligned memory input */
 #define vmovdqu128_memld(a, o)  (o = (__m128i)vld1q_u8((const uint8_t *)(a)))
 #define vpxor128_memld(a, b, o) vpxor128(b, (__m128i)vld1q_u8((const uint8_t *)(a)), o)
-#define vmovq128_memld(a, o)    vmovq128_amemld(a, o)
+#define vmovq128_memld(a, o)    ({ uint8x8_t __tmp = vld1_u8((const uint8_t *)(a)); \
+				   o = (__m128i)vcombine_u8(__tmp, vcreate_u8(0)); })
 
 /* Following operations may have unaligned memory output */
 #define vmovdqu128_memst(a, o)  vst1q_u8((uint8_t *)(o), (uint8x16_t)a)
