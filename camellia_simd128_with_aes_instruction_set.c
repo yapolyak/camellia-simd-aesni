@@ -32,6 +32,7 @@ typedef vector unsigned short uint16x8_t;
 typedef vector unsigned int uint32x4_t;
 typedef vector unsigned long long uint64x2_t;
 typedef uint64x2_t __m128i;
+typedef __m128i __m128i_mem;
 
 #define vec_bswap(a)            ((__m128i)vec_reve((uint8x16_t)a))
 
@@ -96,9 +97,13 @@ typedef uint64x2_t __m128i;
 #define vmovq128_amemld(a, o)   ({ uint64x2_t __tmp = { *(const uint64_t *)(a), 0 }; \
 				   o = (__m128i)(__tmp); })
 
+/* Following operations assume 16-byte aligned memory */
 #define vmovdqa128_memld(a, o)  (o = *(const __m128i *)(a))
 #define vmovdqa128_memst(a, o)  (*(__m128i *)(o) = (a))
 #define vpshufb128_amemld(m, a, o) vpshufb128(*(const __m128i *)(m), a, o)
+#define vpand128_amemld(m, a, o)   vpand128(*(const __m128i *)(m), a, o)
+#define vpxor128_amemld(m, a, o)   vpxor128(*(const __m128i *)(m), a, o)
+#define vpor128_amemld(m, a, o)    vpor128(*(const __m128i *)(m), a, o)
 
 /* Following operations may have unaligned memory input */
 #define vmovdqu128_memld(a, o)  (o = (__m128i)vec_xl(0, (const uint8_t *)(a)))
@@ -141,7 +146,8 @@ static const uint8x16_t shift_row __attribute((unused)) =
  **********************************************************************/
 #include <arm_neon.h>
 
-#define __m128i uint64x2_t
+typedef uint64x2_t __m128i;
+typedef __m128i __m128i_mem;
 
 #define vpand128(a, b, o)       (o = vandq_u64(b, a))
 #define vpandn128(a, b, o)      (o = vbicq_u64(a, b))
@@ -203,9 +209,13 @@ static const uint8x16_t shift_row __attribute((unused)) =
 #define vmovq128_amemld(a, o)   ({ uint64x1_t __tmp = vld1_u64((const uint64_t *)(a)); \
 				   o = (__m128i)vcombine_u64(__tmp, vcreate_u64(0)); })
 
+/* Following operations assume 16-byte aligned memory */
 #define vmovdqa128_memld(a, o)  (o = (*(const __m128i *)(a)))
 #define vmovdqa128_memst(a, o)  (*(__m128i *)(o) = (a))
-#define vpshufb128_amemld(m, a, o) vpshufb128(*(const __m128i *)(m), a, o)
+#define vpshufb128_amemld(m, a, o)  vpshufb128(*(const __m128i *)(m), a, o)
+#define vpand128_amemld(m, a, o)    vpand128(*(const __m128i *)(m), a, o)
+#define vpxor128_amemld(m, a, o)    vpxor128(*(const __m128i *)(m), a, o)
+#define vpor128_amemld(m, a, o)     vpor128(*(const __m128i *)(m), a, o)
 
 /* Following operations may have unaligned memory input */
 #define vmovdqu128_memld(a, o)  (o = (__m128i)vld1q_u8((const uint8_t *)(a)))
@@ -237,6 +247,8 @@ static const uint8x16_t shift_row __attribute((unused)) =
   AT&T x86 asm to intrinsics conversion macros
  **********************************************************************/
 #include <x86intrin.h>
+
+typedef __m128i __m128i_mem;
 
 #define vpand128(a, b, o)       (o = _mm_and_si128(b, a))
 #define vpandn128(a, b, o)      (o = _mm_andnot_si128(b, a))
@@ -286,9 +298,13 @@ static const uint8x16_t shift_row __attribute((unused)) =
 				   o = (__m128i)_mm_loadu_si32(__tmp_ptr + (z)); })
 #define vmovq128_amemld(a, o)   (o = (__m128i)_mm_loadu_si64(a))
 
+/* Following operations assume 16-byte aligned memory */
 #define vmovdqa128_memld(a, o)  (o = (*(const __m128i *)(a)))
 #define vmovdqa128_memst(a, o)  (*(__m128i *)(o) = (a))
-#define vpshufb128_amemld(m, a, o) vpshufb128(*(const __m128i *)(m), a, o)
+#define vpshufb128_amemld(m, a, o)  vpshufb128(*(const __m128i *)(m), a, o)
+#define vpand128_amemld(m, a, o)    vpand128(*(const __m128i *)(m), a, o)
+#define vpxor128_amemld(m, a, o)    vpxor128(*(const __m128i *)(m), a, o)
+#define vpor128_amemld(m, a, o)     vpor128(*(const __m128i *)(m), a, o)
 
 /* Following operations may have unaligned memory input */
 #define vmovdqu128_memld(a, o)  (o = _mm_loadu_si128((const __m128i *)(a)))
@@ -347,11 +363,13 @@ static const uint8x16_t shift_row __attribute((unused)) =
 
 #define load_zero(o) vmovq128(0, o)
 
-#define load_frequent_const(constant, o) vmovdqa128(constant ## _stack, o)
+#define load_frequent_const(constant, o) vmovdqa128_memld(&constant ## _stack, o)
 
-#define prepare_frequent_const(constant) \
-	vmovdqa128_memld(&(constant), constant ## _stack); \
-	memory_barrier_with_vec(constant ## _stack)
+#define prepare_frequent_const(constant) ({ \
+	__m128i __tmp; \
+	vmovdqa128_memld(&(constant), __tmp); \
+	memory_barrier_with_vec(__tmp); \
+	vmovdqa128_memst(__tmp, &constant ## _stack); })
 
 #define prepare_frequent_constants() \
 	prepare_frequent_const(inv_shift_row); \
@@ -370,20 +388,20 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	prepare_frequent_const(post_tf_hi_s2)
 
 #define frequent_constants_declare \
-	__m128i inv_shift_row_stack; \
-	__m128i pack_bswap_stack; \
-	__m128i shufb_16x16b_stack; \
-	__m128i mask_0f_stack; \
-	__m128i pre_tf_lo_s1_stack; \
-	__m128i pre_tf_hi_s1_stack; \
-	__m128i pre_tf_lo_s4_stack; \
-	__m128i pre_tf_hi_s4_stack; \
-	__m128i post_tf_lo_s1_stack; \
-	__m128i post_tf_hi_s1_stack; \
-	__m128i post_tf_lo_s3_stack; \
-	__m128i post_tf_hi_s3_stack; \
-	__m128i post_tf_lo_s2_stack; \
-	__m128i post_tf_hi_s2_stack
+	__m128i_mem inv_shift_row_stack; \
+	__m128i_mem pack_bswap_stack; \
+	__m128i_mem shufb_16x16b_stack; \
+	__m128i_mem mask_0f_stack; \
+	__m128i_mem pre_tf_lo_s1_stack; \
+	__m128i_mem pre_tf_hi_s1_stack; \
+	__m128i_mem pre_tf_lo_s4_stack; \
+	__m128i_mem pre_tf_hi_s4_stack; \
+	__m128i_mem post_tf_lo_s1_stack; \
+	__m128i_mem post_tf_hi_s1_stack; \
+	__m128i_mem post_tf_lo_s3_stack; \
+	__m128i_mem post_tf_hi_s3_stack; \
+	__m128i_mem post_tf_lo_s2_stack; \
+	__m128i_mem post_tf_hi_s2_stack
 
 /**********************************************************************
   16-way camellia macros
@@ -501,40 +519,40 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	\
 	/* Add key material and result to CD (x becomes new CD) */ \
 	\
-	vpshufb128(bcast[7], t0, t7); \
-	vpshufb128(bcast[6], t0, t6); \
-	vpshufb128(bcast[5], t0, t5); \
-	vpshufb128(bcast[4], t0, t4); \
-	vpshufb128(bcast[3], t0, t3); \
-	vpshufb128(bcast[2], t0, t2); \
-	vpshufb128(bcast[1], t0, t1); \
+	vpshufb128_amemld(&bcast[7], t0, t7); \
+	vpshufb128_amemld(&bcast[6], t0, t6); \
+	vpshufb128_amemld(&bcast[5], t0, t5); \
+	vpshufb128_amemld(&bcast[4], t0, t4); \
+	vpshufb128_amemld(&bcast[3], t0, t3); \
+	vpshufb128_amemld(&bcast[2], t0, t2); \
+	vpshufb128_amemld(&bcast[1], t0, t1); \
 	\
 	vpxor128(t3, x4, x4); \
-	vpxor128(mem_cd[0], x4, x4); \
+	vpxor128_amemld(&mem_cd[0], x4, x4); \
 	\
 	load_zero(t3); \
 	vpshufb128(t3, t0, t0); \
 	\
 	vpxor128(t2, x5, x5); \
-	vpxor128(mem_cd[1], x5, x5); \
+	vpxor128_amemld(&mem_cd[1], x5, x5); \
 	\
 	vpxor128(t1, x6, x6); \
-	vpxor128(mem_cd[2], x6, x6); \
+	vpxor128_amemld(&mem_cd[2], x6, x6); \
 	\
 	vpxor128(t0, x7, x7); \
-	vpxor128(mem_cd[3], x7, x7); \
+	vpxor128_amemld(&mem_cd[3], x7, x7); \
 	\
 	vpxor128(t7, x0, x0); \
-	vpxor128(mem_cd[4], x0, x0); \
+	vpxor128_amemld(&mem_cd[4], x0, x0); \
 	\
 	vpxor128(t6, x1, x1); \
-	vpxor128(mem_cd[5], x1, x1); \
+	vpxor128_amemld(&mem_cd[5], x1, x1); \
 	\
 	vpxor128(t5, x2, x2); \
-	vpxor128(mem_cd[6], x2, x2); \
+	vpxor128_amemld(&mem_cd[6], x2, x2); \
 	\
 	vpxor128(t4, x3, x3); \
-	vpxor128(mem_cd[7], x3, x3);
+	vpxor128_amemld(&mem_cd[7], x3, x3);
 
 /*
  * IN/OUT:
@@ -547,14 +565,14 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	roundsm16(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, y4, y5, \
 		  y6, y7, mem_cd, ctx->key_table[(i)]); \
 	\
-	vmovdqa128(x4, mem_cd[0]); \
-	vmovdqa128(x5, mem_cd[1]); \
-	vmovdqa128(x6, mem_cd[2]); \
-	vmovdqa128(x7, mem_cd[3]); \
-	vmovdqa128(x0, mem_cd[4]); \
-	vmovdqa128(x1, mem_cd[5]); \
-	vmovdqa128(x2, mem_cd[6]); \
-	vmovdqa128(x3, mem_cd[7]); \
+	vmovdqa128_memst(x4, &mem_cd[0]); \
+	vmovdqa128_memst(x5, &mem_cd[1]); \
+	vmovdqa128_memst(x6, &mem_cd[2]); \
+	vmovdqa128_memst(x7, &mem_cd[3]); \
+	vmovdqa128_memst(x0, &mem_cd[4]); \
+	vmovdqa128_memst(x1, &mem_cd[5]); \
+	vmovdqa128_memst(x2, &mem_cd[6]); \
+	vmovdqa128_memst(x3, &mem_cd[7]); \
 	\
 	roundsm16(x4, x5, x6, x7, x0, x1, x2, x3, y0, y1, y2, y3, y4, y5, \
 		  y6, y7, mem_ab, ctx->key_table[(i) + (dir)]); \
@@ -565,14 +583,14 @@ static const uint8x16_t shift_row __attribute((unused)) =
 
 #define store_ab_state(x0, x1, x2, x3, x4, x5, x6, x7, mem_ab) \
 	/* Store new AB state */ \
-	vmovdqa128(x0, mem_ab[0]); \
-	vmovdqa128(x1, mem_ab[1]); \
-	vmovdqa128(x2, mem_ab[2]); \
-	vmovdqa128(x3, mem_ab[3]); \
-	vmovdqa128(x4, mem_ab[4]); \
-	vmovdqa128(x5, mem_ab[5]); \
-	vmovdqa128(x6, mem_ab[6]); \
-	vmovdqa128(x7, mem_ab[7]);
+	vmovdqa128_memst(x0, &mem_ab[0]); \
+	vmovdqa128_memst(x1, &mem_ab[1]); \
+	vmovdqa128_memst(x2, &mem_ab[2]); \
+	vmovdqa128_memst(x3, &mem_ab[3]); \
+	vmovdqa128_memst(x4, &mem_ab[4]); \
+	vmovdqa128_memst(x5, &mem_ab[5]); \
+	vmovdqa128_memst(x6, &mem_ab[6]); \
+	vmovdqa128_memst(x7, &mem_ab[7]);
 
 #define enc_rounds16(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, y4, y5, \
 		      y6, y7, mem_ab, mem_cd, i) \
@@ -642,9 +660,9 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	load_zero(tt0); \
 	vmovd128_amemld(0, kl, t0); \
 	vpshufb128(tt0, t0, t3); \
-	vpshufb128(bcast[1], t0, t2); \
-	vpshufb128(bcast[2], t0, t1); \
-	vpshufb128(bcast[3], t0, t0); \
+	vpshufb128_amemld(&bcast[1], t0, t2); \
+	vpshufb128_amemld(&bcast[2], t0, t1); \
+	vpshufb128_amemld(&bcast[3], t0, t0); \
 	\
 	vpand128(l0, t0, t0); \
 	vpand128(l1, t1, t1); \
@@ -654,13 +672,13 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
 	\
 	vpxor128(l4, t0, l4); \
-	vmovdqa128(l4, l[4]); \
+	vmovdqa128_memst(l4, &l[4]); \
 	vpxor128(l5, t1, l5); \
-	vmovdqa128(l5, l[5]); \
+	vmovdqa128_memst(l5, &l[5]); \
 	vpxor128(l6, t2, l6); \
-	vmovdqa128(l6, l[6]); \
+	vmovdqa128_memst(l6, &l[6]); \
 	vpxor128(l7, t3, l7); \
-	vmovdqa128(l7, l[7]); \
+	vmovdqa128_memst(l7, &l[7]); \
 	\
 	/* \
 	 * t2 = krr; \
@@ -670,23 +688,23 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	\
 	vmovd128_amemld(1, kr, t0); \
 	vpshufb128(tt0, t0, t3); \
-	vpshufb128(bcast[1], t0, t2); \
-	vpshufb128(bcast[2], t0, t1); \
-	vpshufb128(bcast[3], t0, t0); \
+	vpshufb128_amemld(&bcast[1], t0, t2); \
+	vpshufb128_amemld(&bcast[2], t0, t1); \
+	vpshufb128_amemld(&bcast[3], t0, t0); \
 	\
-	vpor128(r[4], t0, t0); \
-	vpor128(r[5], t1, t1); \
-	vpor128(r[6], t2, t2); \
-	vpor128(r[7], t3, t3); \
+	vpor128_amemld(&r[4], t0, t0); \
+	vpor128_amemld(&r[5], t1, t1); \
+	vpor128_amemld(&r[6], t2, t2); \
+	vpor128_amemld(&r[7], t3, t3); \
 	\
-	vpxor128(r[0], t0, t0); \
-	vpxor128(r[1], t1, t1); \
-	vpxor128(r[2], t2, t2); \
-	vpxor128(r[3], t3, t3); \
-	vmovdqa128(t0, r[0]); \
-	vmovdqa128(t1, r[1]); \
-	vmovdqa128(t2, r[2]); \
-	vmovdqa128(t3, r[3]); \
+	vpxor128_amemld(&r[0], t0, t0); \
+	vpxor128_amemld(&r[1], t1, t1); \
+	vpxor128_amemld(&r[2], t2, t2); \
+	vpxor128_amemld(&r[3], t3, t3); \
+	vmovdqa128_memst(t0, &r[0]); \
+	vmovdqa128_memst(t1, &r[1]); \
+	vmovdqa128_memst(t2, &r[2]); \
+	vmovdqa128_memst(t3, &r[3]); \
 	\
 	/* \
 	 * t2 = krl; \
@@ -695,25 +713,25 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	 */ \
 	vmovd128_amemld(0, kr, t0); \
 	vpshufb128(tt0, t0, t3); \
-	vpshufb128(bcast[1], t0, t2); \
-	vpshufb128(bcast[2], t0, t1); \
-	vpshufb128(bcast[3], t0, t0); \
+	vpshufb128_amemld(&bcast[1], t0, t2); \
+	vpshufb128_amemld(&bcast[2], t0, t1); \
+	vpshufb128_amemld(&bcast[3], t0, t0); \
 	\
-	vpand128(r[0], t0, t0); \
-	vpand128(r[1], t1, t1); \
-	vpand128(r[2], t2, t2); \
-	vpand128(r[3], t3, t3); \
+	vpand128_amemld(&r[0], t0, t0); \
+	vpand128_amemld(&r[1], t1, t1); \
+	vpand128_amemld(&r[2], t2, t2); \
+	vpand128_amemld(&r[3], t3, t3); \
 	\
 	rol32_1_16(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
 	\
-	vpxor128(r[4], t0, t0); \
-	vpxor128(r[5], t1, t1); \
-	vpxor128(r[6], t2, t2); \
-	vpxor128(r[7], t3, t3); \
-	vmovdqa128(t0, r[4]); \
-	vmovdqa128(t1, r[5]); \
-	vmovdqa128(t2, r[6]); \
-	vmovdqa128(t3, r[7]); \
+	vpxor128_amemld(&r[4], t0, t0); \
+	vpxor128_amemld(&r[5], t1, t1); \
+	vpxor128_amemld(&r[6], t2, t2); \
+	vpxor128_amemld(&r[7], t3, t3); \
+	vmovdqa128_memst(t0, &r[4]); \
+	vmovdqa128_memst(t1, &r[5]); \
+	vmovdqa128_memst(t2, &r[6]); \
+	vmovdqa128_memst(t3, &r[7]); \
 	\
 	/* \
 	 * t0 = klr; \
@@ -723,9 +741,9 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	\
 	vmovd128_amemld(1, kl, t0); \
 	vpshufb128(tt0, t0, t3); \
-	vpshufb128(bcast[1], t0, t2); \
-	vpshufb128(bcast[2], t0, t1); \
-	vpshufb128(bcast[3], t0, t0); \
+	vpshufb128_amemld(&bcast[1], t0, t2); \
+	vpshufb128_amemld(&bcast[2], t0, t1); \
+	vpshufb128_amemld(&bcast[3], t0, t0); \
 	\
 	vpor128(l4, t0, t0); \
 	vpor128(l5, t1, t1); \
@@ -733,30 +751,30 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	vpor128(l7, t3, t3); \
 	\
 	vpxor128(l0, t0, l0); \
-	vmovdqa128(l0, l[0]); \
+	vmovdqa128_memst(l0, &l[0]); \
 	vpxor128(l1, t1, l1); \
-	vmovdqa128(l1, l[1]); \
+	vmovdqa128_memst(l1, &l[1]); \
 	vpxor128(l2, t2, l2); \
-	vmovdqa128(l2, l[2]); \
+	vmovdqa128_memst(l2, &l[2]); \
 	vpxor128(l3, t3, l3); \
-	vmovdqa128(l3, l[3]);
+	vmovdqa128_memst(l3, &l[3]);
 
 #define byteslice_16x16b_fast(a0, b0, c0, d0, a1, b1, c1, d1, a2, b2, c2, d2, \
 			      a3, b3, c3, d3, st0, st1) \
-	vmovdqa128(d2, st0); \
-	vmovdqa128(d3, st1); \
+	vmovdqa128_memst(d2, &st0); \
+	vmovdqa128_memst(d3, &st1); \
 	transpose_4x4(a0, a1, a2, a3, d2, d3); \
 	transpose_4x4(b0, b1, b2, b3, d2, d3); \
-	vmovdqa128(st0, d2); \
-	vmovdqa128(st1, d3); \
+	vmovdqa128_memld(&st0, d2); \
+	vmovdqa128_memld(&st1, d3); \
 	\
-	vmovdqa128(a0, st0); \
-	vmovdqa128(a1, st1); \
+	vmovdqa128_memst(a0, &st0); \
+	vmovdqa128_memst(a1, &st1); \
 	transpose_4x4(c0, c1, c2, c3, a0, a1); \
 	transpose_4x4(d0, d1, d2, d3, a0, a1); \
 	\
-	vmovdqa128(shufb_16x16b_stack, a0); \
-	vmovdqa128(st1, a1); \
+	vmovdqa128_memld(&shufb_16x16b_stack, a0); \
+	vmovdqa128_memld(&st1, a1); \
 	vpshufb128(a0, a2, a2); \
 	vpshufb128(a0, a3, a3); \
 	vpshufb128(a0, b0, b0); \
@@ -772,29 +790,29 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	vpshufb128(a0, d1, d1); \
 	vpshufb128(a0, d2, d2); \
 	vpshufb128(a0, d3, d3); \
-	vmovdqa128(d3, st1); \
-	vmovdqa128(st0, d3); \
+	vmovdqa128_memst(d3, &st1); \
+	vmovdqa128_memld(&st0, d3); \
 	vpshufb128(a0, d3, a0); \
-	vmovdqa128(d2, st0); \
+	vmovdqa128_memst(d2, &st0); \
 	\
 	transpose_4x4(a0, b0, c0, d0, d2, d3); \
 	transpose_4x4(a1, b1, c1, d1, d2, d3); \
-	vmovdqa128(st0, d2); \
-	vmovdqa128(st1, d3); \
+	vmovdqa128_memld(&st0, d2); \
+	vmovdqa128_memld(&st1, d3); \
 	\
-	vmovdqa128(b0, st0); \
-	vmovdqa128(b1, st1); \
+	vmovdqa128_memst(b0, &st0); \
+	vmovdqa128_memst(b1, &st1); \
 	transpose_4x4(a2, b2, c2, d2, b0, b1); \
 	transpose_4x4(a3, b3, c3, d3, b0, b1); \
-	vmovdqa128(st0, b0); \
-	vmovdqa128(st1, b1); \
+	vmovdqa128_memld(&st0, b0); \
+	vmovdqa128_memld(&st1, b1); \
 	/* does not adjust output bytes inside vectors */
 
 /* load blocks to registers and apply pre-whitening */
 #define inpack16_pre(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, y4, y5, \
 		     y6, y7, rio, key) \
 	vmovq128_amemld(&(key), x0); \
-	vpshufb128(pack_bswap_stack, x0, x0); \
+	vpshufb128_amemld(&pack_bswap_stack, x0, x0); \
 	\
 	vpxor128_memld((rio) + 0 * 16, x0, y7); \
 	vpxor128_memld((rio) + 1 * 16, x0, y6); \
@@ -819,22 +837,22 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	byteslice_16x16b_fast(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, \
 			      y4, y5, y6, y7, mem_ab[0], mem_cd[0]); \
 	\
-	vmovdqa128(x0, mem_ab[0]); \
-	vmovdqa128(x1, mem_ab[1]); \
-	vmovdqa128(x2, mem_ab[2]); \
-	vmovdqa128(x3, mem_ab[3]); \
-	vmovdqa128(x4, mem_ab[4]); \
-	vmovdqa128(x5, mem_ab[5]); \
-	vmovdqa128(x6, mem_ab[6]); \
-	vmovdqa128(x7, mem_ab[7]); \
-	vmovdqa128(y0, mem_cd[0]); \
-	vmovdqa128(y1, mem_cd[1]); \
-	vmovdqa128(y2, mem_cd[2]); \
-	vmovdqa128(y3, mem_cd[3]); \
-	vmovdqa128(y4, mem_cd[4]); \
-	vmovdqa128(y5, mem_cd[5]); \
-	vmovdqa128(y6, mem_cd[6]); \
-	vmovdqa128(y7, mem_cd[7]);
+	vmovdqa128_memst(x0, &mem_ab[0]); \
+	vmovdqa128_memst(x1, &mem_ab[1]); \
+	vmovdqa128_memst(x2, &mem_ab[2]); \
+	vmovdqa128_memst(x3, &mem_ab[3]); \
+	vmovdqa128_memst(x4, &mem_ab[4]); \
+	vmovdqa128_memst(x5, &mem_ab[5]); \
+	vmovdqa128_memst(x6, &mem_ab[6]); \
+	vmovdqa128_memst(x7, &mem_ab[7]); \
+	vmovdqa128_memst(y0, &mem_cd[0]); \
+	vmovdqa128_memst(y1, &mem_cd[1]); \
+	vmovdqa128_memst(y2, &mem_cd[2]); \
+	vmovdqa128_memst(y3, &mem_cd[3]); \
+	vmovdqa128_memst(y4, &mem_cd[4]); \
+	vmovdqa128_memst(y5, &mem_cd[5]); \
+	vmovdqa128_memst(y6, &mem_cd[6]); \
+	vmovdqa128_memst(y7, &mem_cd[7]);
 
 /* de-byteslice, apply post-whitening and store blocks */
 #define outunpack16(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, y4, \
@@ -842,10 +860,10 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	byteslice_16x16b_fast(y0, y4, x0, x4, y1, y5, x1, x5, y2, y6, x2, x6, \
 			      y3, y7, x3, x7, stack_tmp0, stack_tmp1); \
 	\
-	vmovdqa128(x0, stack_tmp0); \
+	vmovdqa128_memst(x0, &stack_tmp0); \
 	\
 	vmovq128_amemld(&(key), x0); \
-	vpshufb128(pack_bswap_stack, x0, x0); \
+	vpshufb128_amemld(&pack_bswap_stack, x0, x0); \
 	\
 	vpxor128(x0, y7, y7); \
 	vpxor128(x0, y6, y6); \
@@ -862,7 +880,7 @@ static const uint8x16_t shift_row __attribute((unused)) =
 	vpxor128(x0, x3, x3); \
 	vpxor128(x0, x2, x2); \
 	vpxor128(x0, x1, x1); \
-	vpxor128(stack_tmp0, x0, x0);
+	vpxor128_amemld(&stack_tmp0, x0, x0);
 
 #define write_output(x0, x1, x2, x3, x4, x5, x6, x7, y0, y1, y2, y3, y4, y5, \
 		     y6, y7, rio) \
@@ -924,13 +942,13 @@ static const uint8x16_t shift_row __attribute((unused)) =
 
 typedef uint64_t uint64_unaligned_t __attribute__((aligned(1), may_alias));
 
-static const __m128i shufb_16x16b =
+static const __m128i_mem shufb_16x16b =
   M128I_U32(SHUFB_BYTES(0), SHUFB_BYTES(1), SHUFB_BYTES(2), SHUFB_BYTES(3));
 
-static const __m128i pack_bswap =
+static const __m128i_mem pack_bswap =
   M128I_U32(0x00010203, 0x04050607, 0x0f0f0f0f, 0x0f0f0f0f);
 
-static const __m128i bcast[8] =
+static const __m128i_mem bcast[8] =
 {
   M128I_REP16(0), M128I_REP16(1), M128I_REP16(2), M128I_REP16(3),
   M128I_REP16(4), M128I_REP16(5), M128I_REP16(6), M128I_REP16(7)
@@ -950,11 +968,11 @@ static const __m128i bcast[8] =
  *
  * (note: '⊕ 0xc5' inside camellia_f())
  */
-static const __m128i pre_tf_lo_s1 =
+static const __m128i_mem pre_tf_lo_s1 =
   M128I_BYTE(0x45, 0xe8, 0x40, 0xed, 0x2e, 0x83, 0x2b, 0x86,
 	     0x4b, 0xe6, 0x4e, 0xe3, 0x20, 0x8d, 0x25, 0x88);
 
-static const __m128i pre_tf_hi_s1 =
+static const __m128i_mem pre_tf_hi_s1 =
   M128I_BYTE(0x00, 0x51, 0xf1, 0xa0, 0x8a, 0xdb, 0x7b, 0x2a,
 	     0x09, 0x58, 0xf8, 0xa9, 0x83, 0xd2, 0x72, 0x23);
 
@@ -972,11 +990,11 @@ static const __m128i pre_tf_hi_s1 =
  *
  * (note: '⊕ 0xc5' inside camellia_f())
  */
-static const __m128i pre_tf_lo_s4 =
+static const __m128i_mem pre_tf_lo_s4 =
   M128I_BYTE(0x45, 0x40, 0x2e, 0x2b, 0x4b, 0x4e, 0x20, 0x25,
 	     0x14, 0x11, 0x7f, 0x7a, 0x1a, 0x1f, 0x71, 0x74);
 
-static const __m128i pre_tf_hi_s4 =
+static const __m128i_mem pre_tf_hi_s4 =
   M128I_BYTE(0x00, 0xf1, 0x8a, 0x7b, 0x09, 0xf8, 0x83, 0x72,
 	     0xad, 0x5c, 0x27, 0xd6, 0xa4, 0x55, 0x2e, 0xdf);
 
@@ -996,11 +1014,11 @@ static const __m128i pre_tf_hi_s4 =
  *
  * (note: '⊕ 0x6e' inside camellia_h())
  */
-static const __m128i post_tf_lo_s1 =
+static const __m128i_mem post_tf_lo_s1 =
   M128I_BYTE(0x3c, 0xcc, 0xcf, 0x3f, 0x32, 0xc2, 0xc1, 0x31,
 	     0xdc, 0x2c, 0x2f, 0xdf, 0xd2, 0x22, 0x21, 0xd1);
 
-static const __m128i post_tf_hi_s1 =
+static const __m128i_mem post_tf_hi_s1 =
   M128I_BYTE(0x00, 0xf9, 0x86, 0x7f, 0xd7, 0x2e, 0x51, 0xa8,
 	     0xa4, 0x5d, 0x22, 0xdb, 0x73, 0x8a, 0xf5, 0x0c);
 
@@ -1020,11 +1038,11 @@ static const __m128i post_tf_hi_s1 =
  *
  * (note: '⊕ 0x6e' inside camellia_h())
  */
-static const __m128i post_tf_lo_s2 =
+static const __m128i_mem post_tf_lo_s2 =
   M128I_BYTE(0x78, 0x99, 0x9f, 0x7e, 0x64, 0x85, 0x83, 0x62,
 	     0xb9, 0x58, 0x5e, 0xbf, 0xa5, 0x44, 0x42, 0xa3);
 
-static const __m128i post_tf_hi_s2 =
+static const __m128i_mem post_tf_hi_s2 =
   M128I_BYTE(0x00, 0xf3, 0x0d, 0xfe, 0xaf, 0x5c, 0xa2, 0x51,
 	     0x49, 0xba, 0x44, 0xb7, 0xe6, 0x15, 0xeb, 0x18);
 
@@ -1044,21 +1062,21 @@ static const __m128i post_tf_hi_s2 =
  *
  * (note: '⊕ 0x6e' inside camellia_h())
  */
-static const __m128i post_tf_lo_s3 =
+static const __m128i_mem post_tf_lo_s3 =
   M128I_BYTE(0x1e, 0x66, 0xe7, 0x9f, 0x19, 0x61, 0xe0, 0x98,
 	     0x6e, 0x16, 0x97, 0xef, 0x69, 0x11, 0x90, 0xe8);
 
-static const __m128i post_tf_hi_s3 =
+static const __m128i_mem post_tf_hi_s3 =
   M128I_BYTE(0x00, 0xfc, 0x43, 0xbf, 0xeb, 0x17, 0xa8, 0x54,
 	     0x52, 0xae, 0x11, 0xed, 0xb9, 0x45, 0xfa, 0x06);
 
 /* For isolating SubBytes from AESENCLAST, inverse shift row */
-static const __m128i inv_shift_row =
+static const __m128i_mem inv_shift_row =
   M128I_BYTE(0x00, 0x0d, 0x0a, 0x07, 0x04, 0x01, 0x0e, 0x0b,
 	     0x08, 0x05, 0x02, 0x0f, 0x0c, 0x09, 0x06, 0x03);
 
 /* 4-bit mask */
-static const __m128i mask_0f =
+static const __m128i_mem mask_0f =
   M128I_U32(0x0f0f0f0f, 0x0f0f0f0f, 0x0f0f0f0f, 0x0f0f0f0f);
 
 
@@ -1070,9 +1088,8 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   char *out = vout;
   const char *in = vin;
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15;
-  __m128i ab[8];
-  __m128i cd[8];
-  __m128i tmp0, tmp1;
+  __m128i_mem ab[8], cd[8];
+  __m128i_mem tmp0, tmp1;
   unsigned int lastk, k;
   frequent_constants_declare;
 
@@ -1104,14 +1121,14 @@ void camellia_encrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   }
 
   /* load CD for output */
-  vmovdqa128(cd[0], x8);
-  vmovdqa128(cd[1], x9);
-  vmovdqa128(cd[2], x10);
-  vmovdqa128(cd[3], x11);
-  vmovdqa128(cd[4], x12);
-  vmovdqa128(cd[5], x13);
-  vmovdqa128(cd[6], x14);
-  vmovdqa128(cd[7], x15);
+  vmovdqa128_memld(&cd[0], x8);
+  vmovdqa128_memld(&cd[1], x9);
+  vmovdqa128_memld(&cd[2], x10);
+  vmovdqa128_memld(&cd[3], x11);
+  vmovdqa128_memld(&cd[4], x12);
+  vmovdqa128_memld(&cd[5], x13);
+  vmovdqa128_memld(&cd[6], x14);
+  vmovdqa128_memld(&cd[7], x15);
 
   outunpack16(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14,
 	      x15, ctx->key_table[lastk], tmp0, tmp1);
@@ -1128,9 +1145,8 @@ void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   char *out = vout;
   const char *in = vin;
   __m128i x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15;
-  __m128i ab[8];
-  __m128i cd[8];
-  __m128i tmp0, tmp1;
+  __m128i_mem ab[8], cd[8];
+  __m128i_mem tmp0, tmp1;
   unsigned int firstk, k;
   frequent_constants_declare;
 
@@ -1162,14 +1178,14 @@ void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
   }
 
   /* load CD for output */
-  vmovdqa128(cd[0], x8);
-  vmovdqa128(cd[1], x9);
-  vmovdqa128(cd[2], x10);
-  vmovdqa128(cd[3], x11);
-  vmovdqa128(cd[4], x12);
-  vmovdqa128(cd[5], x13);
-  vmovdqa128(cd[6], x14);
-  vmovdqa128(cd[7], x15);
+  vmovdqa128_memld(&cd[0], x8);
+  vmovdqa128_memld(&cd[1], x9);
+  vmovdqa128_memld(&cd[2], x10);
+  vmovdqa128_memld(&cd[3], x11);
+  vmovdqa128_memld(&cd[4], x12);
+  vmovdqa128_memld(&cd[5], x13);
+  vmovdqa128_memld(&cd[6], x14);
+  vmovdqa128_memld(&cd[7], x15);
 
   outunpack16(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14,
 	      x15, ctx->key_table[0], tmp0, tmp1);
@@ -1341,18 +1357,18 @@ void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 	vmovq128_memst(ab, (uint8_t *)(dst) + 8);
 
 if_not_vprolb128(
-  static const __m128i inv_shift_row_and_unpcklbw_sp2n3_swap32 =
+  static const __m128i_mem inv_shift_row_and_unpcklbw_sp2n3_swap32 =
     M128I_BYTE(0x04, 0xff, 0x01, 0xff, 0x0e, 0xff, 0x0b, 0xff,
 	       0x00, 0xff, 0x0d, 0xff, 0x0a, 0xff, 0x07, 0xff);
 )
 
-static const __m128i sp1mask_swap32 =
+static const __m128i_mem sp1mask_swap32 =
   if_aes_subbytes(M128I_BYTE(0xff, 0x04, 0x04, 0x04, 0xff, 0x04, 0x04, 0x04,
 			     0xff, 0x03, 0x03, 0x03, 0x03, 0xff, 0xff, 0x03))
   if_not_aes_subbytes(M128I_BYTE(0xff, 0x04, 0x04, 0x04, 0xff, 0x04, 0x04, 0x04,
 				 0xff, 0x07, 0x07, 0x07, 0x07, 0xff, 0xff, 0x07));
 
-static const __m128i sp2mask_swap32 =
+static const __m128i_mem sp2mask_swap32 =
   if_aes_subbytes(if_vprolb128(M128I_BYTE(0x07, 0x07, 0x07, 0xff, 0x07, 0x07, 0x07, 0xff,
 					  0x02, 0x02, 0x02, 0xff, 0xff, 0xff, 0x02, 0x02)))
   if_aes_subbytes(if_not_vprolb128(M128I_BYTE(0x0e, 0x0e, 0x0e, 0xff, 0x0e, 0x0e, 0x0e, 0xff,
@@ -1362,7 +1378,7 @@ static const __m128i sp2mask_swap32 =
   if_not_aes_subbytes(if_not_vprolb128(M128I_BYTE(0x06, 0x06, 0x06, 0xff, 0x06, 0x06, 0x06, 0xff,
 						  0x0c, 0x0c, 0x0c, 0xff, 0xff, 0xff, 0x0c, 0x0c)));
 
-static const __m128i sp3mask_swap32 =
+static const __m128i_mem sp3mask_swap32 =
   if_aes_subbytes(if_vprolb128(M128I_BYTE(0x06, 0x06, 0xff, 0x06, 0x06, 0x06, 0xff, 0x06,
 					  0x01, 0x01, 0xff, 0x01, 0xff, 0x01, 0x01, 0xff)))
   if_aes_subbytes(if_not_vprolb128(M128I_BYTE(0x04, 0x04, 0xff, 0x04, 0x04, 0x04, 0xff, 0x04,
@@ -1372,7 +1388,7 @@ static const __m128i sp3mask_swap32 =
   if_not_aes_subbytes(if_not_vprolb128(M128I_BYTE(0x04, 0x04, 0xff, 0x04, 0x04, 0x04, 0xff, 0x04,
 						  0x0a, 0x0a, 0xff, 0x0a, 0xff, 0x0a, 0x0a, 0xff)));
 
-static const __m128i sp4mask_swap32 =
+static const __m128i_mem sp4mask_swap32 =
   if_aes_subbytes(M128I_BYTE(0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff,
 			     0x05, 0xff, 0x05, 0x05, 0x05, 0xff, 0x05, 0x05))
   if_not_aes_subbytes(M128I_BYTE(0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff,
@@ -1520,30 +1536,30 @@ void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
 		    (((b0) & 0xffffffffULL) << 32)) \
 	)
 
-static const __m128i bswap128_mask =
+static const __m128i_mem bswap128_mask =
   M128I_BYTE(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 
 if_not_vprolb128(
-  static const __m128i inv_shift_row_and_unpcklbw =
+  static const __m128i_mem inv_shift_row_and_unpcklbw =
     M128I_BYTE(0x00, 0xff, 0x0d, 0xff, 0x0a, 0xff, 0x07, 0xff,
 	       0x04, 0xff, 0x01, 0xff, 0x0e, 0xff, 0x0b, 0xff);
 )
 
-static const __m128i sp0044440444044404mask =
+static const __m128i_mem sp0044440444044404mask =
   if_aes_subbytes(M128I_U32(0xffff0404, 0x0404ff04, 0x0101ff01, 0x0101ff01))
   if_not_aes_subbytes(M128I_U32(0xffff0404, 0x0404ff04, 0x0d0dff0d, 0x0d0dff0d));
 
-static const __m128i sp1110111010011110mask =
+static const __m128i_mem sp1110111010011110mask =
   if_aes_subbytes(M128I_U32(0x000000ff, 0x000000ff, 0x07ffff07, 0x070707ff))
   if_not_aes_subbytes(M128I_U32(0x000000ff, 0x000000ff, 0x0bffff0b, 0x0b0b0bff));
 
-static const __m128i sp0222022222000222mask =
+static const __m128i_mem sp0222022222000222mask =
   if_aes_subbytes(if_vprolb128(M128I_U32(0xff030303, 0xff030303, 0x0606ffff, 0xff060606)))
   if_aes_subbytes(if_not_vprolb128(M128I_U32(0xff0e0e0e, 0xff0e0e0e, 0x0c0cffff, 0xff0c0c0c)))
   if_not_aes_subbytes(if_vprolb128(M128I_U32(0xff070707, 0xff070707, 0x0e0effff, 0xff0e0e0e)))
   if_not_aes_subbytes(if_not_vprolb128(M128I_U32(0xff060606, 0xff060606, 0x0c0cffff, 0xff0c0c0c)));
 
-static const __m128i sp3033303303303033mask =
+static const __m128i_mem sp3033303303303033mask =
   if_aes_subbytes(if_vprolb128(M128I_U32(0x02ff0202, 0x02ff0202, 0xff0505ff, 0x05ff0505)))
   if_aes_subbytes(if_not_vprolb128(M128I_U32(0x04ff0404, 0x04ff0404, 0xff0202ff, 0x0202ff02)))
   if_not_aes_subbytes(if_vprolb128(M128I_U32(0x0aff0a0a, 0x0aff0a0a, 0xff0101ff, 0x01ff0101)))
@@ -2427,6 +2443,7 @@ int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *vkey,
    *   keylen: key length in bytes
    */
 
+  static const __m128i_mem negx2 = { -1, -1 };
   __m128i x0, x1, x2;
 
   switch (keylen) {
@@ -2443,8 +2460,7 @@ int camellia_keysetup_simd128(struct camellia_simd_ctx *ctx, const void *vkey,
       vmovdqu128_memld(key, x0);
       vmovq128(*(uint64_unaligned_t *)(key + 16), x1);
 
-      x2[0] = -1;
-      x2[1] = -1;
+      vmovdqa128_memld(&negx2, x2);
       vpxor128(x1, x2, x2);
       vpslldq128(8, x2, x2);
       vpor128(x2, x1, x1);
