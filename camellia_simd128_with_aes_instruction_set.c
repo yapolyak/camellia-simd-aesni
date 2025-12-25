@@ -316,19 +316,20 @@ static const uint8x16_t shift_row __attribute((unused)) =
 /**********************************************************************
   helper macros
  **********************************************************************/
-#define filter_8bit(x, lo_t, hi_t, mask4bit, tmp0) \
-	vpand128(x, mask4bit, tmp0); \
-	if_vpsrlb128(vpsrlb128(4, x, x)); \
-	if_not_vpsrlb128(vpandn128(x, mask4bit, x)); \
-	if_not_vpsrlb128(vpsrld128(4, x, x)); \
-	\
-	vpshufb128(tmp0, lo_t, tmp0); \
-	vpshufb128(x, hi_t, x); \
-	vpxor128(tmp0, x, x);
+#define split_nibbles(lo, hi_or_x, x, mask4bit) \
+	vpand128(x, mask4bit, lo); \
+	if_vpsrlb128(vpsrlb128(4, x, hi_or_x)); \
+	if_not_vpsrlb128(vpandn128(x, mask4bit, hi_or_x)); \
+	if_not_vpsrlb128(vpsrld128(4, hi_or_x, hi_or_x));
 
-#define filter_8bit_3op(out, in, lo_t, hi_t, mask4bit, tmp0) \
-	vmovdqa128(in, out); \
-	filter_8bit(out, lo_t, hi_t, mask4bit, tmp0);
+#define filter_8bit_nibbles(x, lo, hi_or_x, lo_t, hi_t, tmp_or_lo) \
+	vpshufb128(lo, lo_t, tmp_or_lo); \
+	vpshufb128(hi_or_x, hi_t, x); \
+	vpxor128(tmp_or_lo, x, x);
+
+#define filter_8bit(x, lo_t, hi_t, mask4bit, tmp0) \
+	split_nibbles(tmp0, x, x, mask4bit); \
+	filter_8bit_nibbles(x, tmp0, x, lo_t, hi_t, tmp0);
 
 #define transpose_4x4(x0, x1, x2, x3, t1, t2) \
 	vpunpckhdq128(x1, x0, t2); \
@@ -1191,13 +1192,14 @@ void camellia_decrypt_16blks_simd128(struct camellia_simd_ctx *ctx, void *vout,
 	\
 	vmovdqa128_memld(&pre_tf_lo_s4, t0); \
 	vmovdqa128_memld(&pre_tf_hi_s4, t1); \
-	if_not_aes_subbytes(load_zero(t3)); \
 	\
 	/* prefilter sboxes s1,s2,s3 */ \
-	filter_8bit_3op(t4, ab, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, t2); \
+	split_nibbles(t2, x, ab, _0f0f0f0fmask); \
+	filter_8bit_nibbles(t4, t2, x, pre_s1lo_mask, pre_s1hi_mask, t3); \
+	if_not_aes_subbytes(load_zero(t3)); \
 	\
 	/* prefilter sbox s4 */ \
-	filter_8bit_3op(x, ab, t0, t1, _0f0f0f0fmask, t2); \
+	filter_8bit_nibbles(x, t2, x, t0, t1, t2); \
 	\
 	vmovdqa128_memld(&post_tf_lo_s1, t0); \
 	vmovdqa128_memld(&post_tf_hi_s1, t1); \
