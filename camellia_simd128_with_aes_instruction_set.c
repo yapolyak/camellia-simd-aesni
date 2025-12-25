@@ -18,6 +18,181 @@
 #include <stdint.h>
 #include "camellia_simd.h"
 
+#if defined(__riscv) && (__riscv_v_min_vlen >= 128) && \
+    (__riscv_v_intrinsic >= 11000) && (__riscv_zvkb >= 1000000) && \
+    (__riscv_zvkned >= 1000000)
+
+/**********************************************************************
+  AT&T x86 asm to intrinsics conversion macros (RISCV RVA23+Zvkb+Zvkned)
+ **********************************************************************/
+#include <riscv_vector.h>
+
+typedef vuint8m1_t __m128i;
+typedef uint64_t __m128i_mem[2] __attribute__ ((aligned (16)));
+
+#define cast_m128i_to_s8(a)     (__riscv_vreinterpret_v_u8m1_i8m1(a))
+#define cast_m128i_to_u16(a)    (__riscv_vreinterpret_v_u8m1_u16m1(a))
+#define cast_m128i_to_u32(a)    (__riscv_vreinterpret_v_u8m1_u32m1(a))
+#define cast_m128i_to_u64(a)    (__riscv_vreinterpret_v_u8m1_u64m1(a))
+#define cast_m128i_to_s64(a)    (__riscv_vreinterpret_v_u64m1_i64m1(cast_m128i_to_u64(a)))
+
+#define cast_s8_to_m128i(a)     (__riscv_vreinterpret_v_i8m1_u8m1(a))
+#define cast_u16_to_m128i(a)    (__riscv_vreinterpret_v_u16m1_u8m1(a))
+#define cast_u32_to_m128i(a)    (__riscv_vreinterpret_v_u32m1_u8m1(a))
+#define cast_u64_to_m128i(a)    (__riscv_vreinterpret_v_u64m1_u8m1(a))
+#define cast_s64_to_m128i(a)    (cast_u64_to_m128i(__riscv_vreinterpret_v_i64m1_u64m1(a)))
+
+#define vpand128(a, b, o)       (o = __riscv_vand_vv_u8m1((a), (b), 16))
+#define vpandn128(a, b, o)      (o = __riscv_vandn_vv_u8m1((a), (b), 16))
+#define vpxor128(a, b, o)       (o = __riscv_vxor_vv_u8m1((a), (b), 16))
+#define vpor128(a, b, o)        (o = __riscv_vor_vv_u8m1((a), (b), 16))
+
+#define vpsrlb128(s, a, o)      (o = __riscv_vsrl_vx_u8m1((a), (s), 16))
+#define vpsllb128(s, a, o)      (o = __riscv_vsll_vx_u8m1((a), (s), 16))
+#define vpsrlw128(s, a, o)      (o = cast_u16_to_m128i(__riscv_vsrl_vx_u16m1( \
+					cast_m128i_to_u16(a), (s), 8)))
+#define vpsllw128(s, a, o)      (o = cast_u16_to_m128i(__riscv_vsll_vx_u16m1( \
+					cast_m128i_to_u16(a), (s), 8)))
+#define vpsrld128(s, a, o)      (o = cast_u32_to_m128i(__riscv_vsrl_vx_u32m1( \
+					cast_m128i_to_u32(a), (s), 4)))
+#define vpslld128(s, a, o)      (o = cast_u32_to_m128i(__riscv_vsll_vx_u32m1( \
+					cast_m128i_to_u32(a), (s), 4)))
+#define vpsrlq128(s, a, o)      (o = cast_u64_to_m128i(__riscv_vsrl_vx_u64m1( \
+					cast_m128i_to_u64(a), (s), 2)))
+#define vpsllq128(s, a, o)      (o = cast_u64_to_m128i(__riscv_vsll_vx_u64m1( \
+					cast_m128i_to_u64(a), (s), 2)))
+#define vpsrldq128(s, a, o)     (o = __riscv_vslidedown_vx_u8m1((a), (s), 16))
+#define vpslldq128(s, a, o)     ({ vuint8m1_t __tmp = __riscv_vmv_v_x_u8m1(0, 16); \
+				   o = __riscv_vslideup_vx_u8m1(__tmp, (a), (s), 16); })
+
+#define if_vpsrlb128(...)       __VA_ARGS__
+#define if_not_vpsrlb128(...)   /*_*/
+#define vpsrl_byte_128(s, a, o) vpsrlb128(s, a, o)
+#define vpsll_byte_128(s, a, o) vpsllb128(s, a, o)
+
+#define if_vprolb128(...)       __VA_ARGS__
+#define if_not_vprolb128(...)   /*_*/
+
+/* GCC & clang is missing __riscv_vrol_vx_u8m1 */
+static inline __attribute__((always_inline)) vuint8m1_t
+vrol_vx_u8m1(vuint8m1_t a, int s, unsigned int vl)
+{
+  vuint8m1_t o;
+  __asm__ (
+    "vsetvli zero,%3,e8,m1,ta,ma;\n\t"
+    "vrol.vx %0,%1,%2;\n\t"
+    : "=vr" (o)
+    : "vr" (a), "r" (s), "r" (vl)
+    : "vl", "vtype"
+  );
+  return o;
+}
+
+#define vprolb128(s, a, o, tmp) (o = vrol_vx_u8m1((a), (s), 16))
+
+#define vpaddb128(a, b, o)      (o = __riscv_vadd_vv_u8m1((a), (b), 16))
+
+#define vpshufb128(m8, a, o)    (o = __riscv_vrgather_vv_u8m1((a), (m8), 16))
+#define vpshufd128(m32, a, o)   ({ static const __m128i_mem __tmp1 = PSHUFD_MASK_TO_PSHUFB_MASK(m32); \
+				   __m128i __tmp2; \
+				   vmovdqa128_memld(&__tmp1, __tmp2); \
+				   vpshufb128(__tmp2, a, o); })
+
+#define vpshufd128_0x4e(a, o)   vpshufd128(0x4e, a, o)
+#define vpshufd128_0x1b(a, o)   vpshufd128(0x1b, a, o)
+
+static const uint16_t vpunpckhdq128_idx_data[4] __attribute__ ((aligned (16))) =
+{
+  2, 2, 3, 3
+};
+static const uint16_t vpunpckldq128_idx_data[4] __attribute__ ((aligned (16))) =
+{
+  0, 0, 1, 1
+};
+
+#define vpunpckXdq128(i, a, b, o) ({ \
+				  vuint16mf2_t __idx = __riscv_vle16_v_u16mf2(i, 4); \
+				  vuint8m1_t __tmp_mask = __riscv_vmv_s_x_u8m1(0b1010, 4); \
+				  vuint32m1_t __vb = cast_m128i_to_u32(b); \
+				  vuint32m1_t __res = __riscv_vrgatherei16_vv_u32m1(\
+						    __vb, __idx, 4); \
+				  vbool32_t __mask = __riscv_vreinterpret_v_u8m1_b32(__tmp_mask); \
+				  vuint32m1_t __va = cast_m128i_to_u32(a); \
+				  __res = __riscv_vrgatherei16_vv_u32m1_tumu(\
+						    __mask, __res, __va, __idx, 4); \
+				  o = cast_u32_to_m128i(__res); })
+
+#define vpunpckldq128(a, b, o)  vpunpckXdq128(vpunpckldq128_idx_data, a, b, o)
+#define vpunpckhdq128(a, b, o)  vpunpckXdq128(vpunpckhdq128_idx_data, a, b, o)
+
+#define vpunpckhqdq128(a, b, o) ({ __m128i __tmp = __riscv_vslidedown_vx_u8m1(b, 8, 16); \
+                                   o = __riscv_vmv_v_v_u8m1_tu(a, __tmp, 8); })
+#define vpunpcklqdq128(a, b, o) (o = __riscv_vslideup_vx_u8m1_tu(b, a, 8, 16))
+
+#define vmovdqa128(a, o)        (o = (a))
+
+#define zero8_128()             __riscv_vmv_v_x_u8m1(0, 16)
+#define zero32_128()            __riscv_vmv_v_x_u32m1(0, 4)
+#define zero64_128()            __riscv_vmv_v_x_u64m1(0, 2)
+
+#define zero128(o)              (o = zero8_128())
+
+#define vmovd128(a, o)          (o = cast_u32_to_m128i(__riscv_vmv_v_x_u32m1_tu( \
+					  zero32_128(), (a), 1)))
+#define vmovq128(a, o)          (o = cast_u64_to_m128i(__riscv_vmv_v_x_u64m1_tu( \
+					  zero64_128(), (a), 1)))
+
+#define vmovd128_amemld(z, a, o) (o = cast_u32_to_m128i(__riscv_vle32_v_u32m1_tu( \
+					  zero32_128(), (const uint32_t *)(a) + z, 1)))
+#define vmovq128_amemld(a, o)    (o = cast_u64_to_m128i(__riscv_vle64_v_u64m1_tu( \
+					  zero64_128(), (const void *)(a), 1)))
+
+/* Following operations assume 16-byte aligned memory */
+#define vmovdqa128_memld(a, o)  (o = __riscv_vle8_v_u8m1((const void *)(a), 16))
+#define vmovdqa128_memst(a, o)  (__riscv_vse8_v_u8m1((void *)(o), (a), 16))
+#define vpshufb128_amemld(m, a, o)  ({ __m128i tmpm; \
+				      vmovdqa128_memld(m, tmpm); \
+				      vpshufb128(tmpm, a, o); })
+#define vpand128_amemld(m, a, o)    ({ __m128i tmpm; \
+				      vmovdqa128_memld(m, tmpm); \
+				      vpand128(tmpm, a, o); })
+#define vpxor128_amemld(m, a, o)    ({ __m128i tmpm; \
+				      vmovdqa128_memld(m, tmpm); \
+				      vpxor128(tmpm, a, o); })
+#define vpor128_amemld(m, a, o)     ({ __m128i tmpm; \
+				      vmovdqa128_memld(m, tmpm); \
+				      vpor128(tmpm, a, o); })
+
+/* Following operations may have unaligned memory input */
+#define vmovdqu128_memld(a, o)  (o = __riscv_vle8_v_u8m1((const void *)(a), 16))
+#define vpxor128_memld(a, b, o) ({ __m128i tmpa; \
+				   vmovdqu128_memld(a, tmpa); \
+				   vpxor128(tmpa, b, o); })
+#define vmovq128_memld(a, o)    (o = __riscv_vle8_v_u8m1_tu( \
+					  zero8_128(), (const void *)(a), 8))
+
+/* Following operations may have unaligned memory output */
+#define vmovdqu128_memst(a, o)  (__riscv_vse8_v_u8m1((void *)(o), (a), 16))
+#define vmovq128_memst(a, o)    (__riscv_vse8_v_u8m1((void *)(o), (a), 8))
+
+/* Zvkned AES encrypt last round => ShiftRows + SubBytes + XOR round key  */
+#define vaesenclast128(a, b, o) (o = cast_u32_to_m128i(__riscv_vaesef_vs_u32m1_u32m1( \
+					cast_m128i_to_u32(b), cast_m128i_to_u32(a), 4)))
+
+/* Macros for exposing SubBytes from Zvkned instruction set. */
+#define aes_subbytes_and_shuf_and_xor(zero, a, o) \
+        vaesenclast128(zero, a, o)
+#define aes_load_inv_shufmask(shufmask_reg) \
+	load_frequent_const(inv_shift_row, shufmask_reg)
+#define aes_inv_shuf(shufmask_reg, a, o) \
+	vpshufb128(shufmask_reg, a, o)
+#define if_aes_subbytes(...) /*_*/
+#define if_not_aes_subbytes(...) __VA_ARGS__
+
+#define memory_barrier_with_vec(a) __asm__("" : "+vr"(a) :: "memory")
+
+#endif /* __riscv */
+
 #if defined(__powerpc__) && defined(__VSX__) && defined(__CRYPTO__) && \
     (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 
@@ -932,6 +1107,24 @@ typedef __m128i __m128i_mem;
 		    (((b6) & 0xffULL) << 48) | \
 		    (((b7) & 0xffULL) << 56)) \
 	}
+
+#define PSHUFD_MASK_TO_PSHUFB_MASK(m32) \
+	M128I_BYTE(((((m32) >> 0) & 0x03) * 4) + 0, \
+		   ((((m32) >> 0) & 0x03) * 4) + 1, \
+		   ((((m32) >> 0) & 0x03) * 4) + 2, \
+		   ((((m32) >> 0) & 0x03) * 4) + 3, \
+		   ((((m32) >> 2) & 0x03) * 4) + 0, \
+		   ((((m32) >> 2) & 0x03) * 4) + 1, \
+		   ((((m32) >> 2) & 0x03) * 4) + 2, \
+		   ((((m32) >> 2) & 0x03) * 4) + 3, \
+		   ((((m32) >> 4) & 0x03) * 4) + 0, \
+		   ((((m32) >> 4) & 0x03) * 4) + 1, \
+		   ((((m32) >> 4) & 0x03) * 4) + 2, \
+		   ((((m32) >> 4) & 0x03) * 4) + 3, \
+		   ((((m32) >> 6) & 0x03) * 4) + 0, \
+		   ((((m32) >> 6) & 0x03) * 4) + 1, \
+		   ((((m32) >> 6) & 0x03) * 4) + 2, \
+		   ((((m32) >> 6) & 0x03) * 4) + 3)
 
 #define M128I_U32(a0, a1, b0, b1) \
 	{ \
