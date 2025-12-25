@@ -90,6 +90,8 @@ typedef __m128i __m128i_mem;
 #define vmovq128(a, o)          ({ uint64x2_t __tmp = { (a), 0 }; \
 				   o = (__m128i)(__tmp); })
 
+#define zero128(o)              vmovq128(0, o)
+
 #define vmovd128_amemld(z, a, o) ({ \
 				   const uint32_t *__tmp_ptr = (const void *)(a); \
 				   uint32x4_t __tmp = { __tmp_ptr[z], 0, 0, 0 }; \
@@ -202,6 +204,8 @@ typedef __m128i __m128i_mem;
 #define vmovd128(a, o)          ({ uint32x4_t __tmp = { a, 0, 0, 0 }; o = (__m128i)__tmp; })
 #define vmovq128(a, o)          ({ uint64x2_t __tmp = { a, 0 }; o = (__m128i)__tmp; })
 
+#define zero128(o)              vmovq128(0, o)
+
 #define vmovd128_amemld(z, a, o) ({ \
 				   const uint32_t *__tmp_ptr = (const void *)(a); \
 				   uint32x4_t __tmp = { __tmp_ptr[z], 0, 0, 0 }; \
@@ -293,6 +297,9 @@ typedef __m128i __m128i_mem;
 #define vmovd128(a, o)          (o = _mm_set_epi32(0, 0, 0, a))
 #define vmovq128(a, o)          (o = _mm_set_epi64x(0, a))
 
+#define zero128(o)              ({ __m128i __tmp = _mm_undefined_si128(); \
+                                   vpxor128(__tmp, __tmp, o); })
+
 #define vmovd128_amemld(z, a, o) ({ \
 				   const uint32_t *__tmp_ptr = (const void *)(a); \
 				   o = (__m128i)_mm_loadu_si32(__tmp_ptr + (z)); })
@@ -361,7 +368,7 @@ typedef __m128i __m128i_mem;
 	vpunpckhqdq128(x2, t2, x3); \
 	vpunpcklqdq128(x2, t2, x2);
 
-#define load_zero(o) vmovq128(0, o)
+#define load_zero(o) zero128(o)
 
 #define load_frequent_const(constant, o) vmovdqa128_memld(&constant ## _stack, o)
 
