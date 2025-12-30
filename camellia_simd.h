@@ -8,6 +8,7 @@
 #define _CAMELLIA_SIMD_H_
 
 #include <stdint.h>
+#include <stddef.h>
 
 #define CAMELLIA_TABLE_BYTE_LEN 272
 
@@ -31,9 +32,9 @@ int have_camellia_1blk_simd128(void);
  * blocks and OUT is pointer to 16 ciphertext blocks. OUT and IN may be
  * unaligned. */
 void camellia_encrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
-				   const void *in);
+				   const void *in, size_t nblocks);
 void camellia_decrypt_1blk_simd128(struct camellia_simd_ctx *ctx, void *out,
-				   const void *in);
+				   const void *in, size_t nblocks);
 
 /* 16-block parallel SIMD128 vector implementation of Camellia. These are
  * 128-bit vector variants (on x86, AES-NI + SSE4.1/AVX). IN is pointer to

@@ -1,8 +1,8 @@
 # About
-In this repository, you find x86 (AES-NI, VAES, GFNI), ARMv8 (Neon/AES Crypto Extension) and PowerPC crypto instruction set accelerated vector implementations of
-[Camellia cipher](https://info.isl.ntt.co.jp/crypt/eng/camellia/).
+In this repository, you find x86 (AES-NI, VAES, GFNI), ARMv8 (Neon/AES Crypto Extension), PowerPC crypto instruction set and
+RISC-V (RVA23+Zvkb+Zvkned) accelerated vector implementations of [Camellia cipher](https://info.isl.ntt.co.jp/crypt/eng/camellia/).
 For x86-64 and aarch64, both Intel C intrinsics and assembly implementations are provided, with the instrinsics implementation being
-easier to port to other instruction sets. For PowerPC, a 128-bit vector instrinsics implementation is provided.
+easier to port to other instruction sets. For PowerPC and RISC-V, a 128-bit vector instrinsics implementation is provided.
 
 # How it works
 It happens to be that Camellia uses s-box construction is very similar to AES SubBytes.
@@ -36,10 +36,12 @@ reference implementation which uses table look-ups.
   - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
 
 - [camellia_simd128_with_aes_instruction_set.c](camellia_simd128_with_aes_instruction_set.c):
-  - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE) and for PowerPC with AES crypto instruction set.
+  - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE),
+    for PowerPC with AES crypto instruction set and RISC-V with RVA23+Zvkb+Zvkned.
     - x86 implementation requires AES-NI and either SSE4.1 or AVX instruction set and gets best performance with x86-64 + AVX.
     - ARM implementation requires AArch64, NEON and ARMv8 AES CE instruction set.
     - PowerPC implementation requires VSX and AES crypto instruction set.
+    - RISC-V implementation requires 64-bit RVA23 with vector cryptography Zvkb and Zvkned extensions.
   - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On ARM/Cortex-A53, this implementation is **~1.4 times slower** than reference (compiled with gcc-15).
   - On Intel Core i3-1115G4 (tigerlake), this implementation is **~1.6 times slower** than reference (compiled with gcc-15).
@@ -49,10 +51,12 @@ reference implementation which uses table look-ups.
 These SIMD128 (128-bit vector) implementation variants process 16 blocks in parallel.
 
 - [camellia_simd128_with_aes_instruction_set.c](camellia_simd128_with_aes_instruction_set.c):
-  - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE) and for PowerPC with AES crypto instruction set.
+  - C intrinsics implementation for x86 with AES-NI, for ARMv8 with Crypto Extension (CE),
+    for PowerPC with AES crypto instruction set and RISC-V with RVA23+Zvkb+Zvkned.
     - x86 implementation requires AES-NI and either SSE4.1 or AVX instruction set and gets best performance with x86-64 + AVX.
     - ARM implementation requires AArch64, NEON and ARMv8 AES CE instruction set.
     - PowerPC implementation requires VSX and AES crypto instruction set.
+    - RISC-V implementation requires 64-bit RVA23 with vector cryptography Zvkb and Zvkned extensions.
   - Includes vector intrinsics implementation of Camellia key-setup (for 128-bit, 192-bit and 256-bit keys).
   - On Intel Core i5-6500 (skylake), this implementation is **~3.5 times faster** than reference.
   - On Intel Core i3-1115G4 (tigerlake), this implementation is **~4.0 times faster** than reference (compiled with gcc-14).
@@ -117,7 +121,8 @@ The SIMD256 (256-bit vector) implementation variants process 32 blocks in parall
 - Optionally GCC i686
 - Optionally GCC aarch64
 - Optionally GCC powerpc64le
-- Ubuntu 22.04 packages: gcc gcc-i686-linux-gnu gcc-aarch64-linux-gnu gcc-powerpc64le-linux-gnu make
+- Optionally GCC riscv64
+- Ubuntu 22.04 packages: gcc gcc-i686-linux-gnu gcc-aarch64-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu make
 
 ## Compiling
 Clone repository and run 'make'…
@@ -133,10 +138,10 @@ x86_64-linux-gnu-gcc -O2 -Wall -DUSE_SIMD256 -c main.c -o main_simd256.o
 x86_64-linux-gnu-gcc camellia_simd128_with_x86_aesni_avx2.o camellia_simd256_x86_aesni.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_intrinsics_x86_64
 x86_64-linux-gnu-gcc -O2 -Wall -march=haswell -mtune=native -mavx2 -maes -mvaes -DUSE_VAES -c camellia_simd256_x86_aesni.c -o camellia_simd256_x86_vaes.o
 x86_64-linux-gnu-gcc camellia_simd128_with_x86_aesni_avx2.o camellia_simd256_x86_vaes.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_intrinsics_x86_64_vaes
-x86_64-linux-gnu-gcc -O2 -Wall -march=znver3 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -c camellia_simd128_with_aes_instruction_set.c -o camellia_simd128_with_x86_aesni_avx512.o
-x86_64-linux-gnu-gcc -O2 -Wall -march=znver3 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -DUSE_VAES -c camellia_simd256_x86_aesni.c -o camellia_simd256_x86_vaes_avx512.o
+x86_64-linux-gnu-gcc -O2 -Wall -march=znver4 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -c camellia_simd128_with_aes_instruction_set.c -o camellia_simd128_with_x86_aesni_avx512.o
+x86_64-linux-gnu-gcc -O2 -Wall -march=znver4 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -DUSE_VAES -c camellia_simd256_x86_aesni.c -o camellia_simd256_x86_vaes_avx512.o
 x86_64-linux-gnu-gcc camellia_simd128_with_x86_aesni_avx512.o camellia_simd256_x86_vaes_avx512.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_intrinsics_x86_64_vaes_avx512
-x86_64-linux-gnu-gcc -O2 -Wall -march=znver3 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -DUSE_GFNI -c camellia_simd256_x86_aesni.c -o camellia_simd256_x86_gfni_avx512.o
+x86_64-linux-gnu-gcc -O2 -Wall -march=znver4 -mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vbmi -mavx512ifma -mavx512vpopcntdq -mavx512vbmi2 -mavx512bitalg -mavx512vnni -mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni -DUSE_GFNI -c camellia_simd256_x86_aesni.c -o camellia_simd256_x86_gfni_avx512.o
 x86_64-linux-gnu-gcc camellia_simd128_with_x86_aesni_avx512.o camellia_simd256_x86_gfni_avx512.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_intrinsics_x86_64_gfni_avx512
 x86_64-linux-gnu-gcc -O2 -Wall -c camellia_simd128_x86-64_aesni_avx.S -o camellia_simd128_x86-64_aesni_avx.o
 x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o main_simd128.o camellia_ref_x86-64.o -o test_simd128_asm_x86_64
@@ -144,9 +149,10 @@ x86_64-linux-gnu-gcc -O2 -Wall -c camellia_simd256_x86-64_aesni_avx2.S -o camell
 x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_aesni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64
 x86_64-linux-gnu-gcc -O2 -Wall -DUSE_VAES -c camellia_simd256_x86-64_aesni_avx2.S -o camellia_simd256_x86-64_vaes_avx2.o
 x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_vaes_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_vaes
-x86_64-linux-gnu-gcc -O2 -Wall -DUSE_GFNI -DUSE_AVX512 -c camellia_simd128_x86-64_aesni_avx.S -o camellia_simd128_x86-64_aesni_avx+avx512+gfni.o
 x86_64-linux-gnu-gcc -O2 -Wall -DUSE_GFNI -c camellia_simd256_x86-64_aesni_avx2.S -o camellia_simd256_x86-64_gfni_avx2.o
-x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx+avx512+gfni.o camellia_simd256_x86-64_gfni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_gfni
+x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx.o camellia_simd256_x86-64_gfni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_gfni
+x86_64-linux-gnu-gcc -O2 -Wall -DUSE_GFNI -DUSE_AVX512 -c camellia_simd128_x86-64_aesni_avx.S -o camellia_simd128_x86-64_aesni_avx+avx512+gfni.o
+x86_64-linux-gnu-gcc camellia_simd128_x86-64_aesni_avx+avx512+gfni.o camellia_simd256_x86-64_gfni_avx2.o main_simd256.o camellia_ref_x86-64.o -o test_simd256_asm_x86_64_gfni_avx512
 i686-linux-gnu-gcc -O2 -Wall -march=sandybridge -mtune=native -msse4.1 -maes -c camellia_simd128_with_aes_instruction_set.c -o camellia_simd128_with_x86_aesni_i386.o
 i686-linux-gnu-gcc -O2 -Wall -c main.c -o main_simd128_i386.o
 i686-linux-gnu-gcc -O2 -Wall -c camellia-BSD-1.2.0/camellia.c -o camellia_ref_i386.o
@@ -165,10 +171,14 @@ powerpc64le-linux-gnu-gcc -O2 -Wall -mcpu=power8 -maltivec -mvsx -mcrypto -c cam
 powerpc64le-linux-gnu-gcc -O2 -Wall -mcpu=power8 -maltivec -mvsx -mcrypto -c main.c -o main_simd128_ppc64le.o
 powerpc64le-linux-gnu-gcc -O2 -Wall -mcpu=power8 -maltivec -mvsx -mcrypto -c camellia-BSD-1.2.0/camellia.c -o camellia_ref_ppc64le.o
 powerpc64le-linux-gnu-gcc camellia_simd128_with_ppc64le.o main_simd128_ppc64le.o camellia_ref_ppc64le.o -o test_simd128_intrinsics_ppc64le
+riscv64-linux-gnu-gcc -O2 -Wall -mstrict-align -march=rv64imafdcv_zba_zbb_zbs_zvkb_zvkned  -c camellia_simd128_with_aes_instruction_set.c -o camellia_simd128_with_riscv64.o
+riscv64-linux-gnu-gcc -O2 -Wall -mstrict-align -march=rv64imafdcv_zba_zbb_zbs_zvkb_zvkned  -c main.c -o main_simd128_riscv64.o
+riscv64-linux-gnu-gcc -O2 -Wall -mstrict-align -march=rv64imafdcv_zba_zbb_zbs_zvkb_zvkned  -c camellia-BSD-1.2.0/camellia.c -o camellia_ref_riscv64.o
+riscv64-linux-gnu-gcc camellia_simd128_with_riscv64.o main_simd128_riscv64.o camellia_ref_riscv64.o -o test_simd128_intrinsics_riscv64
 </pre>
 
 ## Testing
-Fourteen executables are build. Run executables to verify implementation against test-vectors (with
+Fifteen executables are build. Run executables to verify implementation against test-vectors (with
 128-bit, 192-bit and 256-bit key lengths) and benchmark against reference implementation from
 OpenSSL (with 128-bit key length).
 
@@ -179,6 +189,7 @@ Executables are:
 - `test_simd128_intrinsics_x86_64`: SIMD128 only, for testing intrinsics implementation on x86_64/AES-NI/AVX without AVX2.
 - `test_simd128_intrinsics_aarch64`: SIMD128 only, for testing intrinsics implementation on ARMv8 AArch64 with Crypto Extensions.
 - `test_simd128_intrinsics_ppc64le`: SIMD128 only, for testing intrinsics implementation on little-endian 64-bit PowerPC with crypto instruction set.
+- `test_simd128_intrinsics_riscv64`: SIMD128 only, for testing intrinsics implementation on 64-bit RISC-V with RVA23+Zvkb+Zvkned.
 - `test_simd256_asm_x86_64`: SIMD256 and SIMD128, for testing assembly x86-64/AES-NI/AVX2 implementations.
 - `test_simd256_asm_x86_64_gfni`: SIMD256 and SIMD128, for testing assembly x86-64/AES-NI/AVX2 implementations.
 - `test_simd256_asm_x86_64_vaes`: SIMD256 and SIMD128, for testing assembly x86-64/AES-NI/AVX2 implementations.

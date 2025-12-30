@@ -2,6 +2,7 @@ CC_X86_64 = x86_64-linux-gnu-gcc
 CC_I386 = i686-linux-gnu-gcc
 CC_AARCH64 = aarch64-linux-gnu-gcc
 CC_PPC64LE = powerpc64le-linux-gnu-gcc
+CC_RISCV64 = riscv64-linux-gnu-gcc
 CFLAGS = -O2 -Wall
 CFLAGS_SIMD128_X86 = $(CFLAGS) -march=sandybridge -mtune=native -msse4.1 -maes
 CFLAGS_SIMD256_X86 = $(CFLAGS) -march=haswell -mtune=native -mavx2 -maes
@@ -12,6 +13,7 @@ CFLAGS_SIMD256_X86_VAES_AVX512 = $(CFLAGS) -march=znver4 -mavx512f -mavx512vl -m
 					-mprefer-vector-width=512 -mavx2 -maes -mvaes -mgfni
 CFLAGS_SIMD128_ARM = $(CFLAGS) -march=armv8-a+crypto -mtune=cortex-a53
 CFLAGS_SIMD128_PPC = $(CFLAGS) -mcpu=power8 -maltivec -mvsx -mcrypto
+CFLAGS_SIMD128_RISCV64 = $(CFLAGS) -mstrict-align -march=rv64imafdcv_zba_zbb_zbs_zvkb_zvkned # RVA23+Zvkb+Zvkned
 LDFLAGS =
 
 PROGRAMS =
@@ -36,6 +38,9 @@ endif
 ifneq ($(shell which $(CC_PPC64LE)),)
 	PROGRAMS += test_simd128_intrinsics_ppc64le
 endif
+ifneq ($(shell which $(CC_RISCV64)),)
+	PROGRAMS += test_simd128_intrinsics_riscv64
+endif
 
 all: $(PROGRAMS)
 
@@ -56,6 +61,7 @@ clean:
 	rm test_simd128_intrinsics_aarch64 2>/dev/null || true
 	rm test_simd128_asm_armv8 2>/dev/null || true
 	rm test_simd128_intrinsics_ppc64le 2>/dev/null || true
+	rm test_simd128_intrinsics_riscv64 2>/dev/null || true
 
 test_simd128_intrinsics_x86_64: camellia_simd128_with_x86_aesni.o \
 				main_simd128.o \
@@ -141,6 +147,11 @@ test_simd128_intrinsics_ppc64le: camellia_simd128_with_ppc64le.o \
 				 camellia_ref_ppc64le.o
 	$(CC_PPC64LE) $^ -o $@ $(LDFLAGS)
 
+test_simd128_intrinsics_riscv64: camellia_simd128_with_riscv64.o \
+				 main_simd128_riscv64.o \
+				 camellia_ref_riscv64.o
+	$(CC_RISCV64) $^ -o $@ $(LDFLAGS)
+
 
 camellia_simd128_with_x86_aesni.o: camellia_simd128_with_aes_instruction_set.c
 	$(CC_X86_64) $(CFLAGS_SIMD128_X86) -c $< -o $@
@@ -225,3 +236,12 @@ camellia_ref_ppc64le.o: camellia-BSD-1.2.0/camellia.c
 
 main_simd128_ppc64le.o: main.c
 	$(CC_PPC64LE) $(CFLAGS_SIMD128_PPC) -c $< -o $@
+
+camellia_simd128_with_riscv64.o: camellia_simd128_with_aes_instruction_set.c
+	$(CC_RISCV64) $(CFLAGS_SIMD128_RISCV64) -c $< -o $@
+
+camellia_ref_riscv64.o: camellia-BSD-1.2.0/camellia.c
+	$(CC_RISCV64) $(CFLAGS_SIMD128_RISCV64) -c $< -o $@
+
+main_simd128_riscv64.o: main.c
+	$(CC_RISCV64) $(CFLAGS_SIMD128_RISCV64) -c $< -o $@
