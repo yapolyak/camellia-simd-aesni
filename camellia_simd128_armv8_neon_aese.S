@@ -18,12 +18,15 @@
  * OUT:
  *  x (filtered state)
  */
-#define filter_8bit_neon(x,lo_t,hi_t,mask,tmp) \
-    and     tmp.16b,x.16b,mask.16b; \
-    ushr    x.16b,x.16b,#4; \
+#define filter_8bit_neon_3op(out,in,lo_t,hi_t,mask,tmp) \
+    and     tmp.16b,in.16b,mask.16b; \
+    ushr    out.16b,in.16b,#4; \
     tbl     tmp.16b,{lo_t.16b},tmp.16b; \
-    tbl     x.16b,{hi_t.16b},x.16b; \
-    eor     x.16b,x.16b,tmp.16b
+    tbl     out.16b,{hi_t.16b},out.16b; \
+    eor     out.16b,out.16b,tmp.16b;
+
+#define filter_8bit_neon(x,lo_t,hi_t,mask,tmp) \
+    filter_8bit_neon_3op(x,x,lo_t,hi_t,mask,tmp);
 
 /**********************************************************************
   16-way camellia macros
@@ -647,6 +650,24 @@ camellia_neon_consts:
     // Shuffle mask for combining results (part 4 - related to SBOX3 rotate)
     .long   0x04ff0404, 0x04ff0404
     .long   0xff0a0aff, 0x0aff0a0a
+// === Constants for 1-block encryption/decryption F-function ===
+.Lsbox4_input_mask_swap32:
+	.byte 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00
+.Linv_shift_row_and_unpcklbw_sp2n3_swap32:
+	.byte 0x04, 0xff, 0x01, 0xff, 0x0e, 0xff, 0x0b, 0xff
+	.byte 0x00, 0xff, 0x0d, 0xff, 0x0a, 0xff, 0x07, 0xff
+.Lsp4mask_swap32:
+	.byte 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff
+	.byte 0x01, 0xff, 0x01, 0x01, 0x01, 0xff, 0x01, 0x01
+.Lsp1mask_swap32:
+	.byte 0xff, 0x04, 0x04, 0x04, 0xff, 0x04, 0x04, 0x04
+	.byte 0xff, 0x07, 0x07, 0x07, 0x07, 0xff, 0xff, 0x07
+.Lsp2mask_swap32:
+    .byte 0x0b, 0x0b, 0x0b, 0xff, 0x0b, 0x0b, 0x0b, 0xff
+    .byte 0x0a, 0x0a, 0x0a, 0xff, 0xff, 0xff, 0x0a, 0x0a
+.Lsp3mask_swap32:
+    .byte 0x0e, 0x0e, 0xff, 0x0e, 0x0e, 0x0e, 0xff, 0x0e
+    .byte 0x0d, 0x0d, 0xff, 0x0d, 0xff, 0x0d, 0x0d, 0xff
 // === Sigmas for key setup ===
 .Lsigma1:
 	.long 0x3BCC908B, 0xA09E667F;
@@ -2140,12 +2161,231 @@ camellia_keysetup_simd128:
 /*
  * 1-way implementation not yet ported to ARM-CE
  */
+
+/*
+ * Vectorised (NEON/AES) F-function.
+ * Approximately twice slower than the scalar version with table look-up.
+ *
+ * Inputs:
+ *  v_ab:            Input vector register name (e.g., v0 or v1)
+ *  v_x:             Output/Working vector register name (e.g., v2)
+ *  v_t0 - v_t4:     Temporary vector register names (v3-v7)
+ *  v_zero:         v31 - all-zero vector
+ *  pre_s4lo_mask:  v14
+ *  pre_s4hi_mask:  v15
+ *  inv_shift_row:  v17
+ *  _0f0f0f0fmask:  v19
+ *  pre_s1lo_mask:  v20
+ *  pre_s1hi_mask:  v21
+ *  post_s1lo_mask: v22
+ *  post_s1hi_mask: v23
+ *  sp4mask:        v24
+ *  sp1mask:        v25
+ *  sp2mask:        v26
+ *  sp3mask:        v27
+ * Output:
+ *   Lower 64 bits of v_x contain the result.
+ *
+ */
+#define f_aese(v_ab,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask) \
+    \
+	/* S-function with AES subbytes */ \
+    \
+    /* Prefilter sboxes */ \
+    filter_8bit_neon_3op(v_t4, v_ab, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, v_t2); \
+    filter_8bit_neon_3op(v_x, v_ab, pre_s4lo_mask, pre_s4hi_mask, _0f0f0f0fmask, v_t2); \
+    \
+    /* AES subbytes + AES shift rows */ \
+    aese    v_t4.16b,v_zero.16b; \
+    aese    v_x.16b,v_zero.16b; \
+    \
+    /* Postfilter sboxes */ \
+    filter_8bit_neon(v_t4, post_s1lo_mask, post_s1hi_mask, _0f0f0f0fmask, v_t2); \
+    filter_8bit_neon(v_x, post_s1lo_mask, post_s1hi_mask, _0f0f0f0fmask, v_t2); \
+    \
+    /* P-function */ \
+    tbl     v_t0.16b,{v_t4.16b},sp2mask.16b; \
+    tbl     v_t1.16b,{v_t4.16b},sp3mask.16b; \
+    tbl     v_t4.16b,{v_t4.16b},sp1mask.16b; \
+    tbl     v_x.16b,{v_x.16b},sp4mask.16b; \
+    \
+    /* s2 = s1 <<< 1 */ \
+    shl     v_t2.16b,v_t0.16b,#1; \
+    /* s3 = s1 >>> 1 */ \
+    shl     v_t3.16b,v_t1.16b,#7; \
+    \
+    sri     v_t2.16b,v_t0.16b,#7; \
+    sri     v_t3.16b,v_t1.16b,#1; \
+    \
+    eor     v_t4.16b,v_x.16b,v_t4.16b; \
+    eor     v_t2.16b,v_t3.16b,v_t2.16b; \
+    eor     v_t0.16b,v_t4.16b,v_t2.16b; \
+    \
+    ext     v_x.16b,v_t0.16b,v_zero.16b,#8; \
+    eor     v_x.16b,v_t0.16b,v_x.16b;
+
+#define roundsm_aese(v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask) \
+    f_aese(v_ab,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask); \
+    eor     v_cd.16b,v_cd.16b,v_x.16b;
+
+/*
+ * Vectorised implementation of FL/FL^{-1} function.
+ * Approximately as fast as the scalar version.
+ * In: 
+ *   ll_lr, rl_rr (v0, v1) - input states
+ *   tmp_lr, tmp_rr (v2, v3) - vectors to hold right halfs of input states temporarily
+ *   v_t0, v_t1, v_t2, v_t3 (v4-v7) - temporary vector registers
+ *   x_CTX (x0) - base round key pointer
+ *   kl_idx, kr_idx - round key offset indices
+ * Out: ll_lr, rl_rr (updated)
+ */
+#define fls_neon(ll_lr,rl_rr,tmp_lr,tmp_rr,v_t0,v_t1,v_t2,v_t3,x_CTX,kl_idx,kr_idx) \
+    ldp     s4,s5,[x_CTX,#((kl_idx)*8)];    /* kll,klr -> v_t0,v_t1 */ \
+    ushr    tmp_lr.2d,ll_lr.2d,#32;         /* [ 0 | lr ] */ \
+    and     v_t2.8b,ll_lr.8b,v_t0.8b;       /* kll & ll (working on lower 32) */ \
+    \
+    shl     v_t3.4s,v_t2.4s,#1; \
+    sri     v_t3.4s,v_t2.4s,#31;            /* ROL1(kll & ll) */ \
+    \
+    ushr    tmp_rr.2d,rl_rr.2d,#32;         /* pre [ 0 | rr ] */ \
+    \
+    eor     tmp_lr.8b,tmp_lr.8b,v_t3.8b;    /* lr^=ROL1(kll & ll) */ \
+    orr     v_t1.8b,tmp_lr.8b,v_t1.8b;      /* lr^=ROL1(kll & ll) v klr */ \
+    \
+    ldp     s4,s6,[x_CTX,#((kr_idx)*8)];    /* pre-load krl,krr -> v_t0, v_t2 */ \
+    \
+    eor     ll_lr.8b,ll_lr.8b,v_t1.8b;      /* ll^(lr^ROL1(kll & ll) v klr) */ \
+    mov     ll_lr.s[1],tmp_lr.s[0];         /* [ lr^ROL1(kll & ll) | ll^(lr^ROL1(kll & ll) v klr)] */ \
+    \
+    orr     v_t2.8b,tmp_rr.8b,v_t2.8b;      /* rr v krr */ \
+    eor     rl_rr.8b,rl_rr.8b,v_t2.8b;      /* rl^(rr v krr) */ \
+    and     v_t0.8b,rl_rr.8b,v_t0.8b;       /* krl & (rl^(rr v krr)) */ \
+    \
+    shl     v_t3.4s,v_t0.4s,#1; \
+    sri     v_t3.4s,v_t0.4s,#31;            /* ROL1(krl & (rl^(rr v krr))) */ \
+    \
+    eor     tmp_rr.8b,v_t3.8b,tmp_rr.8b;    /* rr^ROL1(krl & (rl^(rr v krr))) */ \
+    mov     rl_rr.s[1],tmp_rr.s[0];         /* [ rr^ROL1(krl & (rl^(rr v krr))) | rl^(rr v krr) ] */
+
+/*
+ * In:
+ *  ab, cd (v0, v1) - vectors to hold input states
+ *  rio_ptr (x2) - pointer to input state
+ *  key_ptr (x0) - pointer to round key
+ *  key (v2) - temporary vector to hold round key
+ *  mask (v3) - temporary vector to hold the swap mask
+ *  gpr_mask - GPR to hold address of the swap mask
+ * Out: ab, cd
+ */
+#define enc_inpack_neon(ab, cd, rio_ptr, key_ptr, key, mask, gpr_mask) \
+    ldp     d0,d1,[rio_ptr];        /* Load input -> ab, cd */ \
+    adrp    gpr_mask,.Lpack_bswap; \
+    add     gpr_mask,gpr_mask,:lo12:.Lpack_bswap; \
+    ldr     q3,[gpr_mask]; /* Load swap mask -> mask */ \
+    ldr     d2,[key_ptr]; /* -> key*/ \
+    tbl     ab.16b,{ab.16b},mask.16b; \
+    tbl     cd.16b,{cd.16b},mask.16b; \
+    eor     ab.16b,ab.16b,key.16b;
+
+/*
+ * In:
+ *   ab, cd (v0, v1) - vectors to hold input states
+ *   rio_ptr (x2) - pointer to input state
+ *   key_ptr (x0) - pointer to round key
+ *   key (v2) - temporary vector to hold round key
+ *   mask (v3) - temporary vector to hold the swap mask
+ *   gpr_mask - GPR to hold address of the swap mask
+ *   max - last key index
+ * Out: ab, cd
+ */
+#define dec_inpack_neon(ab,cd,rio_ptr,key_ptr,key,mask,gpr_mask,max) \
+    ldp     d0,d1,[rio_ptr];   /* Load input */ \
+    adrp    gpr_mask,.Lpack_bswap; \
+    add     gpr_mask,gpr_mask,:lo12:.Lpack_bswap; \
+    ldr     q3,[gpr_mask];      /* Load swap mask into a temporary */ \
+    lsl     w9,max,#3;          /* max * 8 */ \
+    ldr     d2,[key_ptr,x9]; \
+    tbl     ab.16b,{ab.16b},mask.16b; \
+    tbl     cd.16b,{cd.16b},mask.16b; \
+    eor     ab.16b,ab.16b,key.16b;
+
+#define add_key(subkey_idx, cd) \
+    ldr     d8,[x0,#((subkey_idx)*8)]; \
+    eor     cd.16b,cd.16b,v8.16b;
+
+#define roundsm_aese_ab_to_cd(subkey_idx,v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    add_key(subkey_idx, v_cd); \
+    roundsm_aese(v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask);
+
+#define roundsm_aese_cd_to_ab(subkey_idx,v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    add_key(subkey_idx, v_ab); \
+    roundsm_aese(v_cd,v_ab,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask);
+
+#define enc_rounds_aese(i,v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+2),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+3),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+4),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+5),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+6),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+7),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key);
+
+#define dec_rounds_aese(i,v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+7),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+6),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+5),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+4),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_ab_to_cd(((i)+3),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key); \
+    roundsm_aese_cd_to_ab(((i)+2),v_ab,v_cd,v_x,v_t0,v_t1,v_t2,v_t3,v_t4,v_zero,pre_s4lo_mask,pre_s4hi_mask,inv_shift_row,_0f0f0f0fmask,pre_s1lo_mask,pre_s1hi_mask,post_s1lo_mask,post_s1hi_mask,sp4mask,sp1mask,sp2mask,sp3mask,key);
+
+/*
+ * In:
+ *   ab, cd (v0, v1) - vectors to hold input states
+ *   rio_ptr (x1) - pointer to output state
+ *   key_ptr (x0) - pointer to round key
+ *   key (v2) - temporary vector to hold round key
+ *   mask (v3) - temporary vector to hold the swap mask
+ *   gpr_mask - GPR to hold address of the swap mask
+ *   max - last key index
+ * Clobbers: x9
+ * Out: ab, cd
+ */
+#define enc_outunpack_neon(ab,cd,rio_ptr,key_ptr,key,mask,gpr_mask,max); \
+    lsl     w9,max,#3;          /* max * 8 */ \
+    ldr     d2,[key_ptr,x9];    /* assume key_table == 0 */ \
+    adrp    gpr_mask,.Lpack_bswap; \
+    add     gpr_mask,gpr_mask,:lo12:.Lpack_bswap; \
+    ldr     q3,[gpr_mask];      /* Load swap mask into a temporary */ \
+    eor     cd.16b,cd.16b,key.16b; \
+    tbl     ab.16b,{ab.16b},mask.16b; \
+    tbl     cd.16b,{cd.16b},mask.16b; \
+    stp     d1,d0,[rio_ptr];   /* Store output */
+
+/*
+ * In:
+ *   ab, cd (v0, v1) - vectors to hold input states
+ *   rio_ptr (x1) - pointer to output state
+ *   key_ptr (x0) - pointer to round key
+ *   key (v2) - temporary vector to hold round key
+ *   mask (v3) - temporary vector to hold the swap mask
+ *   gpr_mask - GPR to hold address of the swap mask
+ * Out: ab, cd
+ */
+#define dec_outunpack_neon(ab,cd,rio_ptr,key_ptr,key,mask,gpr_mask); \
+    ldr     d2,[key_ptr]; \
+    adrp    gpr_mask,.Lpack_bswap; \
+    add     gpr_mask,gpr_mask,:lo12:.Lpack_bswap; \
+    ldr     q3,[gpr_mask];              /* Load swap mask into a temporary */ \
+    eor     cd.16b,cd.16b,key.16b; \
+    tbl     ab.16b,{ab.16b},mask.16b; \
+    tbl     cd.16b,{cd.16b},mask.16b; \
+    stp     d1,d0,[rio_ptr];            /* Store output */
+
 .text
 .globl  have_camellia_1blk_simd128
 .type   have_camellia_1blk_simd128,%function
 .align  5
 have_camellia_1blk_simd128:
-    mov     x0,#0
+    mov     x0,#1
     ret
 .size   have_camellia_1blk_simd128, .-have_camellia_1blk_simd128
 
@@ -2154,6 +2394,56 @@ have_camellia_1blk_simd128:
 .type   camellia_encrypt_1blk_simd128,%function
 .align  5
 camellia_encrypt_1blk_simd128:
+    stp     x29, x30, [sp, -144]!
+    mov     x29, sp
+
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    // === CONSTANT LOADING ===
+    // Load constants needed for f_aese into v16-v27
+    adrp    x10,camellia_neon_consts
+    add     x10,x10,:lo12:camellia_neon_consts
+    ldp     q16,q17,[x10],#32       // pre_tf_lo/hi_s1
+    ldp     q18,q19,[x10],#32       // pre_tf_lo/hi_s4
+    ldp     q20,q21,[x10],#112      // post_tf_lo/hi_s1
+    ldr     q22,[x10],#160          // mask_0f
+    ldr     q23,[x10],#16           // inv_shift_row_and_unpcklbw_sp2n3_swap32
+    ldp     q24,q25,[x10],#32       // {sp4mask/sp1mask}_swap32
+    ldp     q26,q27,[x10],#32       // {sp2mask/sp3mask}_swap32
+
+    enc_inpack_neon(v0,v1,x2,x0,v2,v3,x5)
+
+    eor     v31.16b,v31.16b,v31.16b
+
+    enc_rounds_aese(0,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,8,9)
+    enc_rounds_aese(8,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,16,17)
+    enc_rounds_aese(16,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+
+    mov     w30,#24         // MAX = 24
+
+    ldr     w9,[x0,#272]    // Assume key_length == 272
+    cmp     w9,#16
+    b.eq    .Lenc_done_aese
+
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,24,25)
+    enc_rounds_aese(24,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+
+    mov     w30,#32         // MAX = 32
+
+.Lenc_done_aese:
+
+    enc_outunpack_neon(v0,v1,x1,x0,v2,v3,x5,w30)
+
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+    ldp     x29,x30,[sp],#144
     ret
 .size   camellia_encrypt_1blk_simd128, .-camellia_encrypt_1blk_simd128
 
@@ -2162,5 +2452,54 @@ camellia_encrypt_1blk_simd128:
 .type   camellia_decrypt_1blk_simd128,%function
 .align  5
 camellia_decrypt_1blk_simd128:
+    stp     x29, x30, [sp, -144]!
+    mov     x29, sp
+
+    stp     q8,q9,[sp,#16]
+    stp     q10,q11,[sp,#48]
+    stp     q12,q13,[sp,#80]
+    stp     q14,q15,[sp,#112]
+
+    ldr     w9,[x0,#272]    // Load key_length byte (assuming offset 272)
+    mov     w30,#32         // w30 will hold the 'max' value
+    mov     w8,#24
+    cmp     w9,#16
+    csel    w30,w8,w30,eq   // w30 == 24 if key_length == 16 else 32.
+
+    // === CONSTANT LOADING ===
+    // Load constants needed for camellia_f into v14-v15 and v17-v27
+    adrp    x10,camellia_neon_consts
+    add     x10,x10,:lo12:camellia_neon_consts
+    ldp     q16,q17,[x10],#32       // pre_tf_lo/hi_s1
+    ldp     q18,q19,[x10],#32       // pre_tf_lo/hi_s4
+    ldp     q20,q21,[x10],#112      // post_tf_lo/hi_s1
+    ldr     q22,[x10],#160          // mask_0f
+    ldr     q23,[x10],#16           // inv_shift_row_and_unpcklbw_sp2n3_swap32
+    ldp     q24,q25,[x10],#32       // {sp4mask/sp1mask}_swap32
+    ldp     q26,q27,[x10],#32       // {sp2mask/sp3mask}_swap32
+
+    dec_inpack_neon(v0,v1,x2,x0,v2,v3,x5,w30)
+
+    eor     v31.16b,v31.16b,v31.16b
+    cmp     w30,#24
+    b.eq    .Ldec_rounds16_aese
+
+    dec_rounds_aese(24,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,25,24)
+
+.Ldec_rounds16_aese:
+    dec_rounds_aese(16,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,17,16)
+    dec_rounds_aese(8,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+    fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,9,8)
+    dec_rounds_aese(0,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
+
+    dec_outunpack_neon(v0,v1,x1,x0,v2,v3,x5)
+
+    ldp     q8,q9,[sp,#16]
+    ldp     q10,q11,[sp,#48]
+    ldp     q12,q13,[sp,#80]
+    ldp     q14,q15,[sp,#112]
+    ldp     x29,x30,[sp],#144
     ret
 .size   camellia_decrypt_1blk_simd128, .-camellia_decrypt_1blk_simd128
