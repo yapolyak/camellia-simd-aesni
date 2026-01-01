@@ -2403,6 +2403,7 @@ camellia_encrypt_1blk_simd128:
     ldp     q24,q25,[x10],#32       // {sp4mask/sp1mask}_swap32
     ldp     q26,q27,[x10],#32       // {sp2mask/sp3mask}_swap32
 
+.Lenc_next_block_aese:
     enc_inpack_neon(v0,v1,x2,x0,v2,v3,x5)
 
     eor     v31.16b,v31.16b,v31.16b
@@ -2426,8 +2427,18 @@ camellia_encrypt_1blk_simd128:
 
 .Lenc_done_aese:
 
+    subs    x3, x3, #1
+
     enc_outunpack_neon(v0,v1,x1,x0,v2,v3,x5,w30)
 
+    b.eq    .Lenc_blocks_complete_aese
+
+    add     x1, x1, #16
+    add     x2, x2, #16
+
+    b       .Lenc_next_block_aese
+
+.Lenc_blocks_complete_aese:
     ldp     q8,q9,[sp,#16]
     ldp     q10,q11,[sp,#48]
     ldp     q12,q13,[sp,#80]
@@ -2467,6 +2478,7 @@ camellia_decrypt_1blk_simd128:
     ldp     q24,q25,[x10],#32       // {sp4mask/sp1mask}_swap32
     ldp     q26,q27,[x10],#32       // {sp2mask/sp3mask}_swap32
 
+.Ldec_next_block_aese:
     dec_inpack_neon(v0,v1,x2,x0,v2,v3,x5,w30)
 
     eor     v31.16b,v31.16b,v31.16b
@@ -2483,7 +2495,18 @@ camellia_decrypt_1blk_simd128:
     fls_neon(v0,v1,v2,v3,v4,v5,v6,v7,x0,9,8)
     dec_rounds_aese(0,v0,v1,v2,v3,v4,v5,v6,v7,v31,v18,v19,v23,v22,v16,v17,v20,v21,v24,v25,v26,v27,x8)
 
+    subs    x3, x3, #1
+
     dec_outunpack_neon(v0,v1,x1,x0,v2,v3,x5)
+
+    b.eq    .Ldec_blocks_complete_aese
+
+    add     x1, x1, #16
+    add     x2, x2, #16
+
+    b       .Ldec_next_block_aese
+
+.Ldec_blocks_complete_aese:
 
     ldp     q8,q9,[sp,#16]
     ldp     q10,q11,[sp,#48]
