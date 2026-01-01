@@ -12,6 +12,15 @@
   helper macros
  **********************************************************************/
 
+#define split_nibbles_neon(lo,hi_or_x,x,mask) \
+    and     lo.16b,x.16b,mask.16b; \
+    ushr    hi_or_x.16b,x.16b,#4;
+
+#define filter_8bit_nibbles_neon(x,lo,hi_or_x,lo_t,hi_t,tmp_or_lo) \
+    tbl     tmp_or_lo.16b,{lo_t.16b},lo.16b; \
+    tbl     x.16b,{hi_t.16b},hi_or_x.16b; \
+    eor     x.16b,x.16b,tmp_or_lo.16b;
+
 /*
  * IN:
  *  x (input state), lo_t, hi_t (filters), mask, tmp
@@ -19,11 +28,8 @@
  *  x (filtered state)
  */
 #define filter_8bit_neon_3op(out,in,lo_t,hi_t,mask,tmp) \
-    and     tmp.16b,in.16b,mask.16b; \
-    ushr    out.16b,in.16b,#4; \
-    tbl     tmp.16b,{lo_t.16b},tmp.16b; \
-    tbl     out.16b,{hi_t.16b},out.16b; \
-    eor     out.16b,out.16b,tmp.16b;
+    split_nibbles_neon(tmp,out,in,mask); \
+    filter_8bit_nibbles_neon(out,tmp,out,lo_t,hi_t,tmp);
 
 #define filter_8bit_neon(x,lo_t,hi_t,mask,tmp) \
     filter_8bit_neon_3op(x,x,lo_t,hi_t,mask,tmp);
@@ -2181,8 +2187,9 @@ camellia_keysetup_simd128:
 	/* S-function with AES subbytes */ \
     \
     /* Prefilter sboxes */ \
-    filter_8bit_neon_3op(v_t4, v_ab, pre_s1lo_mask, pre_s1hi_mask, _0f0f0f0fmask, v_t2); \
-    filter_8bit_neon_3op(v_x, v_ab, pre_s4lo_mask, pre_s4hi_mask, _0f0f0f0fmask, v_t2); \
+    split_nibbles_neon(v_t2, v_x, v_ab, _0f0f0f0fmask); \
+    filter_8bit_nibbles_neon(v_t4, v_t2, v_x, pre_s1lo_mask, pre_s1hi_mask, v_t3); \
+    filter_8bit_nibbles_neon(v_x, v_t2, v_x, pre_s4lo_mask, pre_s4hi_mask, v_t2); \
     \
     /* AES subbytes + AES shift rows */ \
     aese    v_t4.16b,v_zero.16b; \
